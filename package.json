@@ -1,0 +1,73 @@
+{
+  "name": "@inariwatch/capture",
+  "version": "0.5.1",
+  "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "inariwatch-capture": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./auto": {
+      "import": "./dist/auto.js",
+      "types": "./dist/auto.d.ts"
+    },
+    "./next": {
+      "import": "./dist/plugins/next.js",
+      "types": "./dist/plugins/next.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/browser.js",
+      "types": "./dist/browser.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": [
+    "./dist/auto.js",
+    "./dist/browser.js"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsc"
+  },
+  "keywords": [
+    "error-tracking",
+    "monitoring",
+    "inariwatch",
+    "capture",
+    "nextjs",
+    "sentry-alternative"
+  ],
+  "author": "Jesus Bernal <info@jesusbr.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/orbita-pos/inariwatch-capture.git"
+  },
+  "homepage": "https://inariwatch.com/docs#int-capture",
+  "bugs": {
+    "url": "https://github.com/orbita-pos/inariwatch-capture/issues"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "rrweb": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "rrweb": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.5.0"
+  }
+}
