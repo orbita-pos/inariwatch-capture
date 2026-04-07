@@ -121,14 +121,14 @@ export function createTransport(config: CaptureConfig, parsed: ParsedDSN): Trans
   async function flushRetries() {
     if (retryBuffer.length === 0) return
     const batch = retryBuffer.splice(0, retryBuffer.length)
-    for (const event of batch) {
-      const ok = await sendOne(event)
+    for (let i = 0; i < batch.length; i++) {
+      const ok = await sendOne(batch[i])
       if (!ok) {
-        // Re-buffer failed events (up to limit)
-        if (retryBuffer.length < MAX_RETRY_BUFFER) {
-          retryBuffer.push(event)
+        const remaining = batch.slice(i)
+        for (const evt of remaining) {
+          if (retryBuffer.length < MAX_RETRY_BUFFER) retryBuffer.push(evt)
         }
-        break // Stop retrying on first failure
+        break
       }
     }
   }

@@ -136,10 +136,9 @@ export function getRequestContext(): Scope["requestContext"] {
  * Use in middleware: runWithScope(() => handleRequest(req, res))
  */
 export function runWithScope<T>(fn: () => T): T {
-  if (asyncStorage) {
-    return asyncStorage.run({}, fn)
-  }
-  // Edge runtime: clear global scope for this request
-  globalScope = {}
-  return fn()
+  if (asyncStorage) return asyncStorage.run({}, fn);
+  const prev = globalScope;
+  globalScope = {};
+  try { return fn(); }
+  finally { globalScope = prev; }
 }

@@ -9,12 +9,13 @@
 
 import { extractGitInfo } from "../git.js"
 
-type NextConfig = Record<string, unknown> & {
+type NextConfig = {
   experimental?: Record<string, unknown>
   env?: Record<string, string>
+  [key: string]: unknown
 }
 
-export function withInariWatch(nextConfig: NextConfig = {}): NextConfig {
+export function withInariWatch<T extends NextConfig>(nextConfig: T = {} as T): T {
   const gitEnv = extractGitInfo()
 
   return {

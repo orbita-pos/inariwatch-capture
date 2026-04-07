@@ -62,7 +62,8 @@ export function init(config: CaptureConfig = {}): void {
 async function initSubstrate(subConfig: SubstrateConfig, config: CaptureConfig): Promise<void> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const agent: any = await (Function('return import("@inariwatch/substrate-agent")')())
+    const pkg = "@inariwatch/substrate-agent"
+    const agent: any = await import(/* webpackIgnore: true */ pkg)
     agent.init({
       bufferSeconds: subConfig.bufferSeconds ?? 60,
       ...(subConfig.redact ? { redact: subConfig.redact } : {}),

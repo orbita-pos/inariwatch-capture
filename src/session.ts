@@ -92,7 +92,8 @@ export async function initSession(
   try {
     // Dynamic import — rrweb is an optional peer dependency
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rrweb: any = await (Function('return import("rrweb")')())
+    const pkg = "rrweb"
+    const rrweb: any = await import(/* webpackIgnore: true */ pkg)
     const record = rrweb.record || rrweb.default?.record
 
     if (!record) {
@@ -121,7 +122,7 @@ export async function initSession(
       maskTextSelector: sensitiveSelectors,
 
       // Event handler — extract actionable events and enrich with selectors
-      emit(rrwebEvent: Record<string, unknown>) {
+      async emit(rrwebEvent: Record<string, unknown>) {
         // rrweb event types: 0=DomContentLoaded, 1=Load, 2=FullSnapshot,
         // 3=IncrementalSnapshot, 4=Meta, 5=Custom
         const eventType = rrwebEvent.type as number
@@ -131,7 +132,7 @@ export async function initSession(
           // Meta event — navigation (scrub sensitive query params from URL)
           const href = (data?.href as string) ?? ""
           if (href) {
-            const { scrubUrl } = await (Function('return import("./breadcrumbs.js")')())
+            const { scrubUrl } = await import("./breadcrumbs.js")
             pushEvent({
               timestamp: Date.now(),
               type: "navigation",
