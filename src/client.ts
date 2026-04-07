@@ -18,8 +18,9 @@ export async function flush(): Promise<void> {
 }
 
 export function init(config: CaptureConfig = {}): void {
-  const dsn = config.dsn || process.env.INARIWATCH_DSN
-  const environment = config.environment || process.env.INARIWATCH_ENVIRONMENT || process.env.NODE_ENV
+  const env = typeof process !== "undefined" && process.env ? process.env : {} as Record<string, string | undefined>
+  const dsn = config.dsn || env.INARIWATCH_DSN
+  const environment = config.environment || env.INARIWATCH_ENVIRONMENT || env.NODE_ENV
   globalConfig = { ...config, dsn, environment }
 
   if (!dsn) {
