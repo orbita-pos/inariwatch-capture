@@ -16,6 +16,7 @@ export interface GitContext {
  * Returns null if no git context is available (e.g., no .git directory).
  */
 export function getGitContext(): GitContext | null {
+  if (typeof process === "undefined" || !process.env) return null
   const commit = process.env.INARIWATCH_GIT_COMMIT
   if (!commit) return null
 
