@@ -1,6 +1,6 @@
 {
   "name": "@inariwatch/capture",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies",
   "type": "module",
   "main": "./dist/index.js",
@@ -8,11 +8,9 @@
   "bin": {
     "inariwatch-capture": "./dist/cli.js"
   },
-  "browser": "./dist/browser.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
@@ -30,6 +28,11 @@
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
+    },
+    "./shield": {
+      "types": "./dist/shield/index.d.ts",
+      "import": "./dist/shield/index.js",
+      "default": "./dist/shield/index.js"
     }
   },
   "files": [
@@ -39,7 +42,8 @@
   ],
   "sideEffects": [
     "./dist/auto.js",
-    "./dist/browser.js"
+    "./dist/browser.js",
+    "./dist/shield/index.js"
   ],
   "scripts": {
     "build": "tsc",
