@@ -24,9 +24,5 @@ export function withInariWatch<T extends NextConfig>(nextConfig: T = {} as T): T
       ...nextConfig.env,
       ...gitEnv,
     },
-    experimental: {
-      ...nextConfig.experimental,
-      instrumentationHook: true,
-    },
   }
 }
