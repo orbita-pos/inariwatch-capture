@@ -24,6 +24,22 @@
       "import": "./dist/plugins/next.js",
       "default": "./dist/plugins/next.js"
     },
+    "./vite": {
+      "types": "./dist/plugins/vite.d.ts",
+      "import": "./dist/plugins/vite.js",
+      "default": "./dist/plugins/vite.js"
+    },
+    "./webpack": {
+      "types": "./dist/plugins/webpack.d.ts",
+      "import": "./dist/plugins/webpack.js",
+      "require": "./dist/plugins/webpack.js",
+      "default": "./dist/plugins/webpack.js"
+    },
+    "./nuxt": {
+      "types": "./dist/plugins/nuxt.d.ts",
+      "import": "./dist/plugins/nuxt.js",
+      "default": "./dist/plugins/nuxt.js"
+    },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js",
