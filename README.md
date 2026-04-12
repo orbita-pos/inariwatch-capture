@@ -16,12 +16,26 @@ When you're ready for the cloud dashboard, add one env var:
 INARIWATCH_DSN=https://app.inariwatch.com/api/webhooks/capture/YOUR_ID
 ```
 
-## Next.js
+## Supported frameworks
 
-The CLI sets this up automatically, but if you prefer manual:
+`npx @inariwatch/capture` auto-detects and configures any of these:
+
+| Framework | Plugin | Runtime |
+|---|---|---|
+| Next.js | `@inariwatch/capture/next` | Node + Edge |
+| Vite | `@inariwatch/capture/vite` | Node |
+| Nuxt 3 | `@inariwatch/capture/nuxt` | Node |
+| Remix / SvelteKit / Astro | `@inariwatch/capture/vite` | Node |
+| SolidStart / Qwik | `@inariwatch/capture/vite` | Node |
+| webpack (CRA, Vue CLI, Angular) | `@inariwatch/capture/webpack` | Node |
+| Express / Fastify / Koa / Hono | `@inariwatch/capture/auto` | Node |
+| Bun / Deno | `@inariwatch/capture/auto` | Node-compat |
+| Python / Go / Rust apps with Node instrumentation | — | Parent process |
+
+### Next.js
 
 ```typescript
-// next.config.ts — one line
+// next.config.ts
 import { withInariWatch } from "@inariwatch/capture/next"
 export default withInariWatch(nextConfig)
 ```
@@ -30,13 +44,53 @@ export default withInariWatch(nextConfig)
 // instrumentation.ts
 import "@inariwatch/capture/auto"
 import { captureRequestError } from "@inariwatch/capture"
-
 export const onRequestError = captureRequestError
 ```
 
-`withInariWatch` automatically injects git context (commit, branch, message) at build time.
+### Vite (covers Vite + Remix + SvelteKit + Astro + SolidStart + Qwik)
 
-## Any Node.js app
+```typescript
+// vite.config.ts
+import { defineConfig } from "vite"
+import { inariwatchVite } from "@inariwatch/capture/vite"
+
+export default defineConfig({
+  plugins: [inariwatchVite()],
+})
+```
+
+### Nuxt 3
+
+```typescript
+// nuxt.config.ts
+export default defineNuxtConfig({
+  modules: ["@inariwatch/capture/nuxt"],
+})
+```
+
+### Astro (Vite under the hood)
+
+```typescript
+// astro.config.mjs
+import { defineConfig } from "astro/config"
+import { inariwatchVite } from "@inariwatch/capture/vite"
+
+export default defineConfig({
+  vite: { plugins: [inariwatchVite()] },
+})
+```
+
+### webpack (CRA, Vue CLI, Angular, raw webpack)
+
+```javascript
+// webpack.config.js
+const { withInariWatchWebpack } = require("@inariwatch/capture/webpack")
+module.exports = withInariWatchWebpack({
+  // your existing webpack config
+})
+```
+
+### Express / Fastify / Koa / Hono / any Node.js app
 
 ```bash
 node --import @inariwatch/capture/auto app.js
@@ -47,6 +101,8 @@ Or in package.json:
 ```json
 { "scripts": { "start": "node --import @inariwatch/capture/auto src/index.js" } }
 ```
+
+All framework plugins inject git context (commit, branch, message) at build time and mark capture as external on server bundles so its `node:` builtin imports don't leak into client or edge chunks.
 
 ## Automatic context
 
@@ -168,18 +224,23 @@ When `captureException()` fires, the last 60 seconds of I/O are uploaded with th
 |--------|-------------|
 | `@inariwatch/capture` | SDK — `init`, `captureException`, `captureLog`, `addBreadcrumb`, `setUser`, `setTag`, `setRequestContext`, `flush` |
 | `@inariwatch/capture/auto` | Auto-init on import — config from env vars |
-| `@inariwatch/capture/next` | Next.js plugin — `withInariWatch()` (injects git context) |
+| `@inariwatch/capture/browser` | Browser entry — error + unhandled rejection listeners |
+| `@inariwatch/capture/shield` | Runtime security — source-to-sink attack detection |
+| `@inariwatch/capture/next` | Next.js plugin — `withInariWatch()` |
+| `@inariwatch/capture/vite` | Vite plugin — `inariwatchVite()` (covers Nuxt/Remix/SvelteKit/Astro/SolidStart/Qwik) |
+| `@inariwatch/capture/webpack` | webpack wrapper — `withInariWatchWebpack()` (covers CRA/Vue CLI/Angular) |
+| `@inariwatch/capture/nuxt` | Nuxt 3 module — add to `modules: []` |
 
 ## Features
 
 - **Zero config** — `npx @inariwatch/capture` and you're done
 - **Zero dependencies** — just `fetch` (Node 18+)
+- **Works with every major framework** — Next, Vite, Nuxt, Remix, SvelteKit, Astro, webpack, Express, Fastify, Node
 - **Automatic context** — git, breadcrumbs, environment, request, user, tags
 - **Privacy by default** — secrets, PII, and auth headers scrubbed automatically
 - **Env var driven** — no DSN in source code, `INARIWATCH_DSN` from env
 - **Local mode** — works without signup, errors print to terminal
 - **Substrate** — full I/O recording with one env var
-- **Auto framework detection** — Next.js, Express, Node.js
 - **Deploy markers** — setting `release` sends a deploy event
 - **Retry buffer** — failed events retry automatically
 - **HMAC signing** — events signed for webhook verification
