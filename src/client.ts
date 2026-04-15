@@ -58,6 +58,26 @@ export function init(config: CaptureConfig = {}): void {
       // session.ts uses dynamic import of rrweb — errors handled there
     })
   }
+
+  // Run registered integrations (replay, performance, feedback, …). Each
+  // integration is a small object from a sibling package that installs its
+  // own hooks. Core capture never imports integration code directly — that
+  // keeps the error-tracking bundle at ~32KB for users who don't opt in.
+  if (config.integrations && config.integrations.length > 0) {
+    const seen = new Set<string>()
+    for (const integration of config.integrations) {
+      if (!integration || typeof integration.setup !== "function") continue
+      if (seen.has(integration.name)) continue
+      seen.add(integration.name)
+      try {
+        integration.setup(globalConfig)
+      } catch (err) {
+        if (!config.silent) {
+          console.warn(`[@inariwatch/capture] integration "${integration.name}" setup failed:`, err instanceof Error ? err.message : err)
+        }
+      }
+    }
+  }
 }
 
 async function initSubstrate(subConfig: SubstrateConfig, config: CaptureConfig): Promise<void> {
@@ -101,8 +121,15 @@ function reportDeploy(release: string, environment?: string): void {
   })
 }
 
-/** Enrich event with git, env, breadcrumbs, user, tags, request context */
+/** Enrich event with git, env, breadcrumbs, user, tags, request context, replay session id */
 function enrichEvent(event: ErrorEvent): ErrorEvent {
+  // Pick up replay session id (set by replay.ts when Replay V2 is active).
+  // This lets the server link a server-side error back to the browser session
+  // for synced timeline playback.
+  const replaySessionId = typeof window !== "undefined"
+    ? (window as unknown as { __INARIWATCH_SESSION__?: string }).__INARIWATCH_SESSION__
+    : undefined
+
   return {
     ...event,
     git: getGitContext() ?? undefined,
@@ -111,6 +138,9 @@ function enrichEvent(event: ErrorEvent): ErrorEvent {
     user: getUser(),
     tags: getTags(),
     request: getRequestContext() ?? event.request,
+    metadata: replaySessionId
+      ? { ...event.metadata, replaySessionId }
+      : event.metadata,
   }
 }
 
@@ -139,12 +169,24 @@ export function captureException(
 
   const transport = globalTransport
   const config = globalConfig
-  computeErrorFingerprint(title, body).then((fp) => {
+  computeErrorFingerprint(title, body).then(async (fp) => {
     const fullEvent = enrichEvent({ ...event, fingerprint: fp })
 
     // Attach session recording if available (before send)
     if (sessionFlush) {
       fullEvent.sessionEvents = sessionFlush()
+    }
+
+    // Attach substrate I/O recording if available (piggybacked on error event)
+    if (substrateFlush) {
+      try {
+        const recording = await substrateFlush()
+        if (recording && typeof recording === "object" && "events" in (recording as Record<string, unknown>)) {
+          fullEvent.substrateEvents = (recording as { events: unknown[] }).events
+        }
+      } catch {
+        if (config.debug) console.warn("[@inariwatch/capture] Substrate flush failed")
+      }
     }
 
     if (config.beforeSend) {
@@ -153,10 +195,6 @@ export function captureException(
       transport.send(filtered)
     } else {
       transport.send(fullEvent)
-    }
-
-    if (substrateFlush) {
-      substrateFlush().catch(() => {})
     }
   })
 }

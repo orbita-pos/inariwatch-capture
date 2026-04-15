@@ -1,7 +1,7 @@
 {
   "name": "@inariwatch/capture",
-  "version": "0.7.1",
-  "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies",
+  "version": "0.8.0",
+  "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies. Add @inariwatch/capture-replay for session replay.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -45,6 +45,11 @@
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
     },
+    "./client": {
+      "types": "./dist/client-entry.d.ts",
+      "import": "./dist/client-entry.js",
+      "default": "./dist/client-entry.js"
+    },
     "./shield": {
       "types": "./dist/shield/index.d.ts",
       "import": "./dist/shield/index.js",
@@ -85,13 +90,14 @@
   },
   "license": "MIT",
   "peerDependencies": {
-    "rrweb": "^2.0.0"
+    "rrweb": "^2.0.0-alpha.18"
   },
   "peerDependenciesMeta": {
     "rrweb": {
       "optional": true
     }
   },
+  "//": "rrweb stays as an optional peer solely because `session.ts` (the legacy 60s ring buffer attached to errors) still uses it. Full Replay V2 moved to @inariwatch/capture-replay which depends on rrweb directly.",
   "devDependencies": {
     "@types/node": "^25.5.0",
     "typescript": "^5.5.0"

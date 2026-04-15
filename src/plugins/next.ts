@@ -12,11 +12,16 @@ import { extractGitInfo } from "../git.js"
 type NextConfig = {
   experimental?: Record<string, unknown>
   env?: Record<string, string>
+  serverExternalPackages?: string[]
   [key: string]: unknown
 }
 
 export function withInariWatch<T extends NextConfig>(nextConfig: T = {} as T): T {
   const gitEnv = extractGitInfo()
+  const existingExternals = nextConfig.serverExternalPackages ?? []
+  const serverExternalPackages = existingExternals.includes("@inariwatch/capture")
+    ? existingExternals
+    : [...existingExternals, "@inariwatch/capture"]
 
   return {
     ...nextConfig,
@@ -24,5 +29,6 @@ export function withInariWatch<T extends NextConfig>(nextConfig: T = {} as T): T
       ...nextConfig.env,
       ...gitEnv,
     },
+    serverExternalPackages,
   }
 }

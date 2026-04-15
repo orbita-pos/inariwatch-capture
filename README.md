@@ -245,6 +245,76 @@ When `captureException()` fires, the last 60 seconds of I/O are uploaded with th
 - **Retry buffer** — failed events retry automatically
 - **HMAC signing** — events signed for webhook verification
 
+## Session replay
+
+Session replay lives in a separate package so the core SDK stays lean (~32 KB gzipped). Install only when you need it:
+
+```bash
+npm install @inariwatch/capture-replay
+```
+
+Or let the CLI do it interactively:
+
+```bash
+npx @inariwatch/capture init
+# → "Enable session replay? [y/N]"
+```
+
+### Usage (Next.js App Router)
+
+```tsx
+// app/capture-init.tsx
+"use client"
+import { useEffect } from "react"
+
+export function CaptureInit() {
+  useEffect(() => {
+    void (async () => {
+      const [{ init }, { replayIntegration }] = await Promise.all([
+        import("@inariwatch/capture"),
+        import("@inariwatch/capture-replay"),
+      ])
+      init({
+        dsn: process.env.NEXT_PUBLIC_INARIWATCH_DSN,
+        projectId: process.env.NEXT_PUBLIC_INARIWATCH_PROJECT_ID,
+        integrations: [replayIntegration()],
+      })
+    })()
+  }, [])
+  return null
+}
+```
+
+```tsx
+// app/layout.tsx
+import { CaptureInit } from "./capture-init"
+
+export default function RootLayout({ children }) {
+  return <html><body><CaptureInit />{children}</body></html>
+}
+```
+
+See [@inariwatch/capture-replay](https://www.npmjs.com/package/@inariwatch/capture-replay) for the full options list (PII classifier, block duration, mask selectors).
+
+## Integration pattern
+
+The `integrations: [...]` array in `init()` is how plugin-style extensions hook into capture. Any package exporting an `Integration`-shaped object can be registered:
+
+```ts
+import { init } from "@inariwatch/capture"
+import { replayIntegration } from "@inariwatch/capture-replay"
+
+init({
+  dsn: "...",
+  integrations: [
+    replayIntegration({ piiClassifier: "ai" }),
+    // future: performanceIntegration(), feedbackIntegration(), ...
+  ],
+})
+```
+
+Core capture has zero knowledge of replay or any future integration — each lives in its own package and pays zero bundle cost for users who don't opt in.
+
 ## License
 
 MIT

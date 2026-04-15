@@ -55,27 +55,32 @@ export function shieldMiddleware() {
 }
 
 /**
- * Mark a Next.js/Web API Request object's inputs as tainted.
- * Call this in instrumentation.ts or middleware.ts.
+ * Mark a Web API Request object's inputs as tainted.
+ * Works with any framework that passes a Fetch-compatible Request: Next.js,
+ * Remix, SvelteKit, Astro, Hono, Cloudflare Workers, Deno, Bun, etc.
+ *
+ * Call this in instrumentation.ts, middleware.ts, or your framework's
+ * equivalent request entrypoint.
  *
  * Usage: markRequestTainted(request)
  */
 export function markRequestTainted(request: {
   url?: string
-  nextUrl?: { searchParams?: URLSearchParams }
   headers?: { get?: (key: string) => string | null; forEach?: (fn: (v: string, k: string) => void) => void }
 }): void {
-  // URL search params
-  if (request.nextUrl?.searchParams) {
-    request.nextUrl.searchParams.forEach((value, key) => {
-      markTainted(value, `req.searchParams.${key}`)
-    })
-  } else if (request.url) {
+  if (request.url) {
     try {
       const url = new URL(request.url)
+
+      // URL search params
       url.searchParams.forEach((value, key) => {
         markTainted(value, `req.searchParams.${key}`)
       })
+
+      // URL path segments
+      for (const seg of url.pathname.split("/").filter(Boolean)) {
+        if (seg.length >= 3) markTainted(decodeURIComponent(seg), "req.url.path")
+      }
     } catch { /* invalid URL */ }
   }
 
@@ -85,15 +90,5 @@ export function markRequestTainted(request: {
       const val = request.headers.get(key)
       if (val) markTainted(val, `req.headers.${key}`)
     }
-  }
-
-  // URL path segments
-  if (request.url) {
-    try {
-      const path = new URL(request.url).pathname
-      for (const seg of path.split("/").filter(Boolean)) {
-        if (seg.length >= 3) markTainted(decodeURIComponent(seg), "req.url.path")
-      }
-    } catch { /* invalid URL */ }
   }
 }

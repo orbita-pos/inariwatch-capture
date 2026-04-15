@@ -31,13 +31,20 @@ export function parseDSN(dsn: string): ParsedDSN {
 }
 
 async function signPayload(body: string, secret: string): Promise<string> {
-  try {
-    const nodeCrypto = await import("crypto")
-    if (nodeCrypto.createHmac) {
-      return `sha256=${nodeCrypto.createHmac("sha256", secret).update(body, "utf8").digest("hex")}`
+  // Node path first (faster + no async crypto.subtle). Skip on browsers —
+  // `node:crypto` is not resolvable there.
+  if (typeof window === "undefined") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pkg = "node:crypto"
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodeCrypto: any = await import(/* webpackIgnore: true */ pkg)
+      if (nodeCrypto.createHmac) {
+        return `sha256=${nodeCrypto.createHmac("sha256", secret).update(body, "utf8").digest("hex")}`
+      }
+    } catch {
+      // Fallback: Web Crypto API
     }
-  } catch {
-    // Fallback: Web Crypto API
   }
 
   const encoder = new TextEncoder()

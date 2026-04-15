@@ -17,7 +17,7 @@ export interface TaintSource {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let asyncStorage: any = null
 try {
-  const { AsyncLocalStorage } = require("node:async_hooks")
+  const { AsyncLocalStorage } = (0, eval)("require")("node:async_hooks")
   asyncStorage = new AsyncLocalStorage()
 } catch {
   // Edge runtime — fallback to global store
@@ -25,6 +25,7 @@ try {
 
 // Global fallback for environments without AsyncLocalStorage
 let globalStore: Map<string, TaintSource> | null = null
+const MAX_TAINT_ENTRIES = 500 // Prevent unbounded memory growth
 
 function getStore(): Map<string, TaintSource> {
   if (asyncStorage) {
@@ -32,6 +33,15 @@ function getStore(): Map<string, TaintSource> {
     if (store) return store
   }
   if (!globalStore) globalStore = new Map()
+  // Evict oldest entries if store exceeds limit (prevents memory leak)
+  if (globalStore.size > MAX_TAINT_ENTRIES) {
+    const toDelete = globalStore.size - MAX_TAINT_ENTRIES
+    const keys = globalStore.keys()
+    for (let i = 0; i < toDelete; i++) {
+      const next = keys.next()
+      if (!next.done) globalStore.delete(next.value)
+    }
+  }
   return globalStore
 }
 

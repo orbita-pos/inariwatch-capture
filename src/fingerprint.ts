@@ -16,12 +16,18 @@
 //  11. Collapse whitespace, trim
 //  12. SHA-256 → hex string (64 chars)
 
-let cryptoModule: typeof import("crypto") | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cryptoModule: any = null
 
-async function getNodeCrypto(): Promise<typeof import("crypto") | null> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getNodeCrypto(): Promise<any> {
   if (cryptoModule) return cryptoModule
+  // Skip in browsers — `node:crypto` is not a resolvable URL there, and
+  // Turbopack/webpack can't polyfill it. The caller falls back to Web Crypto.
+  if (typeof window !== "undefined") return null
   try {
-    cryptoModule = await import("crypto")
+    const pkg = "node:crypto"
+    cryptoModule = await import(/* webpackIgnore: true */ pkg)
     return cryptoModule
   } catch {
     return null
