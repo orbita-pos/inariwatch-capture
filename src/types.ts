@@ -16,6 +16,12 @@ export interface CaptureConfig {
   /** Enable browser session recording — requires rrweb installed. Browser-only. */
   session?: boolean | SessionConfig
   /**
+   * FullTrace session id propagation. Default: enabled in browser.
+   * Set to `false` to disable header injection entirely (returns SDK to
+   * v0.7.x behaviour). See `fulltrace.ts` for the resolution order.
+   */
+  fullTrace?: boolean | FullTraceConfig
+  /**
    * Project UUID — required by some integrations (e.g. `replayIntegration`)
    * that identify the target workspace.
    */
@@ -61,6 +67,16 @@ export interface SessionConfig {
   redactSelectors?: string[]
   /** Mask all input values (default: false — only passwords are masked) */
   maskAllInputs?: boolean
+}
+
+export interface FullTraceConfig {
+  /**
+   * Inject `X-IW-Session-Id` on cross-origin fetches too. Defaults to false
+   * because cross-origin custom headers trigger CORS preflights that most
+   * third-party APIs (Stripe, Algolia, …) won't allow. Enable only when
+   * your backend lives off-origin AND you control its CORS config.
+   */
+  allowCrossOrigin?: boolean
 }
 
 export interface SessionEvent {

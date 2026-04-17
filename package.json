@@ -1,7 +1,7 @@
 {
   "name": "@inariwatch/capture",
-  "version": "0.8.0",
-  "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies. Add @inariwatch/capture-replay for session replay.",
+  "version": "0.9.0",
+  "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies. Includes FullTrace session id propagation for causal debugging. Add @inariwatch/capture-replay for full session replay.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

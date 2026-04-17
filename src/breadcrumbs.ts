@@ -2,9 +2,14 @@
  * Breadcrumbs — automatic trail of actions before a crash.
  * Ring buffer of last 30 events: console, fetch, custom.
  * Secrets are scrubbed from messages automatically.
+ *
+ * Also the injection point for FullTrace's X-IW-Session-Id header — we
+ * already wrap globalThis.fetch here for breadcrumb capture, so adding
+ * one header to the same wrapper avoids a second monkey-patch.
  */
 
 import type { Breadcrumb } from "./types.js"
+import { injectSessionHeader } from "./fulltrace.js"
 
 const MAX_BREADCRUMBS = 30
 const breadcrumbs: Breadcrumb[] = []
@@ -95,8 +100,13 @@ export function initBreadcrumbs(): void {
       const method = init?.method ?? "GET"
       addBreadcrumb({ category: "fetch", message: `${method} ${url}`, level: "info" })
 
+      // FullTrace: inject X-IW-Session-Id when same-origin (or cross-origin opt-in).
+      // injectSessionHeader returns the original init if the session is inactive,
+      // so this is a zero-cost no-op for users on v0.7.x behaviour.
+      const finalInit = injectSessionHeader(rawUrl, init)
+
       try {
-        const resp = await origFetch(input, init)
+        const resp = await origFetch(input, finalInit)
         if (!resp.ok) {
           addBreadcrumb({ category: "fetch", message: `${method} ${url} → ${resp.status}`, level: "warning" })
         }
