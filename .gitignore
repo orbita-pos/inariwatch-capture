@@ -1,3 +1,9 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Test harness, bundler smoke tests, and dev-only test setup are not shipped
+# from the mirror — they live in the orbita-pos/inariwatch monorepo.
+test/
+test-bundlers/
+test-setup/

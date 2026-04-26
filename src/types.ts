@@ -49,6 +49,21 @@ export interface Integration {
   name: string
   /** Called once during init. Runs synchronously — queue async work yourself. */
   setup: (config: CaptureConfig) => void
+  /**
+   * Optional async hook fired immediately before an event is sent to the
+   * transport. Lets integrations enrich (e.g. the in-package `agent`
+   * integration attaches `event.hypotheses[]`) or drop (return `null`)
+   * events.
+   *
+   * Hooks run in registration order; any one returning `null` short-
+   * circuits the chain (event is dropped, transport not called). The user-
+   * supplied `config.beforeSend` runs AFTER all integration hooks.
+   *
+   * Hooks must respect their own deadline — core does not enforce a global
+   * timeout. A blocking hook stalls the event flush. Recommended: race
+   * against `AbortSignal.timeout()` inside the hook.
+   */
+  onBeforeSend?: (event: ErrorEvent) => Promise<ErrorEvent | null>
 }
 
 export interface SubstrateConfig {
@@ -157,6 +172,131 @@ export interface ErrorEvent {
   sessionEvents?: SessionEvent[]
   /** Substrate I/O recording — attached on error flush */
   substrateEvents?: unknown[]
+
+  // ─── Payload v2 (additive, all optional) ─────────────────────────────
+  // Spec: CAPTURE_V2_IMPLEMENTATION.md §3.1
+  // Wire-format contract: server treats unknown v2 fields as opaque
+  // correlationData extensions; v1-only events keep working unchanged.
+
+  /** v2 marker — advisory only. Absence = v1 behavior. */
+  schemaVersion?: "2.0"
+
+  /** Forensic capture from inspector.Session (forensicsIntegration) */
+  forensics?: ForensicsCapture
+
+  /** Per-frame source slice + git blame (sourceContextIntegration) */
+  sourceContext?: SourceContextFrame[]
+
+  /** Runtime snapshot at throw time (cheap, always-on when v2 enabled) */
+  runtimeSnap?: RuntimeSnap
+
+  /** 1Hz precursor signals from last 60s (precursorsIntegration) */
+  precursors?: Precursor[]
+
+  /** Hypotheses produced by local capture-agent peer (Q5.3) */
+  hypotheses?: Hypothesis[]
+
+  /** Fleet bloom-filter match result (Q5.4) */
+  fleetMatch?: FleetMatch
+
+  /** Intent contracts compiler output (Q5.7) */
+  expected?: { contracts: IntentContract[] }
+
+  /** Causal graph edgelist (Q5.6) */
+  causalGraph?: CausalGraph
+
+  /** EAP signatures over evidence merkle root (Q5.2 + Q5.9) */
+  eapSignatures?: EapSignatures
+
+  /** SDK-side estimated token count for the whole payload */
+  tokensEstimated?: number
+}
+
+// ─── Payload v2 supporting types ──────────────────────────────────────
+
+export type SerializedValue =
+  | { type: "primitive"; value: string | number | boolean | null }
+  | { type: "object"; preview: string; truncated: boolean }
+  | { type: "redacted"; reason: "pii" | "size" | "secret" }
+
+export interface ForensicsCapture {
+  /** Per-frame locals (frame index → name → value). Capped 4KB/frame. */
+  locals?: Record<string, Record<string, SerializedValue>>
+  /** Closure variable chains per frame */
+  closureChains?: Record<string, Record<string, SerializedValue>>
+  /** Async stack from inspector.Session */
+  asyncStack?: string[]
+}
+
+export interface SourceContextFrame {
+  frameIndex: number
+  before: string[]
+  line: string
+  after: string[]
+  blame?: { commit: string; author: string; date: string; message: string }
+}
+
+export interface RuntimeSnap {
+  heapMb: number
+  rssMb: number
+  eventloopP99Ms: number
+  openHandles: number
+}
+
+export interface Precursor {
+  signal:
+    | "eventloop_p99"
+    | "rss_trend"
+    | "retry_burst"
+    | "circuit_breaker_trip"
+    | "near_miss_rejection"
+  deltaPct: number
+  windowSeconds: number
+}
+
+export interface Hypothesis {
+  text: string
+  prior: number
+  cites: string[]
+  confidence: number
+  source: "local_agent" | "bloom_match" | "heuristic"
+}
+
+export interface FleetMatch {
+  bloomHit: boolean
+  communityFixId?: string
+  teamsHit?: number
+}
+
+export interface IntentContract {
+  source: "ts" | "zod" | "drizzle" | "openapi" | "prisma" | "graphql" | "pydantic" | "java" | "rust"
+  path: string
+  shape: unknown
+}
+
+export interface CausalGraphNode {
+  id: string
+  kind: "io" | "fn" | "promise" | "syscall"
+  label: string
+}
+
+export interface CausalGraphEdge {
+  from: string
+  to: string
+  kind: "causal" | "temporal" | "data"
+}
+
+export interface CausalGraph {
+  nodes: CausalGraphNode[]
+  edges: CausalGraphEdge[]
+}
+
+export interface EapSignatures {
+  evidenceMerkleRoot: string
+  evidenceSignature: string
+  signerPubkey: string
+  signedAt: string
+  receiptId?: string
 }
 
 export type VulnerabilityType =

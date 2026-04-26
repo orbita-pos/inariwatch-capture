@@ -1,4 +1,5 @@
 import type { CaptureConfig, ErrorEvent, ParsedDSN } from "./types.js"
+import { isZeroRetentionEnabled, extractTombstone, persistTombstone } from "./tombstone.js"
 
 const MAX_RETRY_BUFFER = 30
 
@@ -68,6 +69,37 @@ const SEVERITY_COLORS: Record<string, string> = {
   info: "\x1b[36m",      // cyan
 }
 
+// Dev-log JSONL sink (Track E pieza 9 / Sesión 10). When INARIWATCH_DEV_LOG=1
+// (or INARIWATCH_DEV_LOG_PATH set), every event sent through the local
+// transport is also appended as a single JSON line to a per-project file
+// that `@inariwatch/capture-mcp` reads to expose `get_recent_errors` /
+// `diagnose_error_id` / `get_locals_at_frame` over stdio MCP. The file is
+// not rotated by us; the MCP server caps reads to the tail.
+//
+// Why per-project (cwd) and not ~/.inariwatch: same cwd = same project
+// makes it match what Cursor/Claude Code see as the workspace root, so
+// the editor's MCP client and the running app land on the same file
+// without extra config. Override via INARIWATCH_DEV_LOG_PATH.
+async function appendDevLog(event: ErrorEvent): Promise<void> {
+  if (typeof window !== "undefined") return
+  const enabled = process.env.INARIWATCH_DEV_LOG === "1" || !!process.env.INARIWATCH_DEV_LOG_PATH
+  if (!enabled) return
+  try {
+    const pkg = "node:fs/promises"
+    const pathPkg = "node:path"
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fs: any = await import(/* webpackIgnore: true */ pkg)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const path: any = await import(/* webpackIgnore: true */ pathPkg)
+    const filePath = process.env.INARIWATCH_DEV_LOG_PATH ?? path.join(process.cwd(), ".inariwatch", "errors.jsonl")
+    await fs.mkdir(path.dirname(filePath), { recursive: true })
+    await fs.appendFile(filePath, JSON.stringify(event) + "\n", "utf8")
+  } catch {
+    // Dev-log is best-effort — never fail the user's app for a missing
+    // disk / permission error in their dev box.
+  }
+}
+
 export function createLocalTransport(_config: CaptureConfig): Transport {
   return {
     send(event: ErrorEvent) {
@@ -93,6 +125,8 @@ export function createLocalTransport(_config: CaptureConfig): Transport {
       if (event.context) {
         console.log(`${dim}  context: ${JSON.stringify(event.context)}${reset}`)
       }
+
+      appendDevLog(event)
     },
     async flush() {},
   }
@@ -114,9 +148,36 @@ export function createTransport(config: CaptureConfig, parsed: ParsedDSN): Trans
       headers["x-capture-signature"] = await signPayload(body, parsed.secretKey)
     }
 
+    // Zero-retention mode (Track E pieza 11). The flag is read once at
+    // module load — see ./tombstone.ts. We add the header on every
+    // request when on; the server sees it, runs the dedup+notify
+    // pipeline, and returns a signed tombstone we persist locally for
+    // audit. The header is harmless against an old server (it ignores
+    // unknown headers), so this stays safe across SDK/server skew.
+    const zeroRetention = isZeroRetentionEnabled()
+    if (zeroRetention) {
+      headers["X-IW-Zero-Retention"] = "1"
+    }
+
     try {
       const res = await fetch(parsed.endpoint, { method: "POST", headers, body })
-      if (res.ok) return true
+      if (res.ok) {
+        if (zeroRetention) {
+          // Best-effort: parse + persist the tombstone. Never blocks the
+          // send result — a parse miss just means this hop didn't return
+          // a tombstone (e.g. legacy server, error in tombstone signing).
+          try {
+            const json = await res.clone().json()
+            const tombstone = extractTombstone(json)
+            if (tombstone) {
+              persistTombstone(tombstone).catch(() => {})
+            }
+          } catch {
+            // Non-JSON response — fine, no tombstone to persist.
+          }
+        }
+        return true
+      }
       log(`HTTP ${res.status} from ${parsed.endpoint}`)
       return false
     } catch (err) {

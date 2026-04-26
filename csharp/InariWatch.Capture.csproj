@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <PackageId>InariWatch.Capture</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Jesus Bernal / OrbitaPOS</Authors>
+    <Description>Lightweight error capture SDK for InariWatch — payload-compatible with @inariwatch/capture on npm.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://inariwatch.com</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/orbita-pos/inariwatch-capture-csharp</RepositoryUrl>
+    <PackageTags>error;monitoring;observability;capture;telemetry</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

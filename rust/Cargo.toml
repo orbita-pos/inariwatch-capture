@@ -1,0 +1,61 @@
+[package]
+name = "inariwatch-capture"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Lightweight error capture SDK for InariWatch — zero required dependencies, payload-compatible with @inariwatch/capture on npm."
+license = "MIT"
+repository = "https://github.com/orbita-pos/inariwatch-capture-rust"
+homepage = "https://inariwatch.com"
+documentation = "https://docs.rs/inariwatch-capture"
+readme = "README.md"
+keywords = ["error", "monitoring", "observability", "capture", "telemetry"]
+categories = ["development-tools::debugging"]
+
+[features]
+default = ["transport-ureq"]
+# HTTP transport flavours — pick exactly one. ``transport-ureq`` is the
+# default because it has no async runtime requirement; ``transport-reqwest``
+# is opt-in for apps already using tokio.
+transport-ureq = ["dep:ureq"]
+transport-reqwest = ["dep:reqwest", "dep:tokio"]
+# Framework adapters.
+axum = ["dep:axum", "dep:tower", "dep:tokio"]
+actix = ["dep:actix-web"]
+# Intent compiler — parse `#[derive(Serialize, Deserialize)]` structs in
+# the failing file and attach a JSON-Schema-flavoured shape to the
+# payload. Off by default: pulls `syn` (compile-time only, but adds a
+# couple of seconds of build overhead).
+intent-serde = ["dep:syn"]
+
+[dependencies]
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+once_cell = "1.19"
+parking_lot = "0.12"
+regex = "1.10"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# Optional transports.
+ureq = { version = "2.10", optional = true, default-features = false, features = ["tls"] }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1.40", optional = true, features = ["sync", "rt", "macros"] }
+
+# Optional framework adapters.
+axum = { version = "0.7", optional = true }
+tower = { version = "0.5", optional = true }
+actix-web = { version = "4", optional = true, default-features = false }
+
+# Optional intent peer (gated behind `intent-serde`).
+syn = { version = "2", optional = true, features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["full"] }
+serde_json = "1.0"
+
+[lib]
+name = "inariwatch_capture"
+path = "src/lib.rs"
