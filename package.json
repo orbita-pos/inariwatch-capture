@@ -1,6 +1,6 @@
 {
   "name": "@inariwatch/capture",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies. Includes FullTrace session id propagation for causal debugging. Add @inariwatch/capture-replay for full session replay.",
   "type": "module",
   "main": "./dist/index.js",
@@ -79,6 +79,16 @@
       "types": "./dist/browser-v2/auto.d.ts",
       "import": "./dist/browser-v2/auto.js",
       "default": "./dist/browser-v2/auto.js"
+    },
+    "./feedback": {
+      "types": "./dist/feedback/index.d.ts",
+      "import": "./dist/feedback/index.js",
+      "default": "./dist/feedback/index.js"
+    },
+    "./performance": {
+      "types": "./dist/performance/index.d.ts",
+      "import": "./dist/performance/index.js",
+      "default": "./dist/performance/index.js"
     }
   },
   "files": [
@@ -116,16 +126,21 @@
   },
   "license": "MIT",
   "peerDependencies": {
-    "rrweb": "^2.0.0-alpha.18"
+    "rrweb": "^2.0.0-alpha.18",
+    "web-vitals": "^4.2.0"
   },
   "peerDependenciesMeta": {
     "rrweb": {
+      "optional": true
+    },
+    "web-vitals": {
       "optional": true
     }
   },
   "//": "rrweb stays as an optional peer solely because `session.ts` (the legacy 60s ring buffer attached to errors) still uses it. Full Replay V2 moved to @inariwatch/capture-replay which depends on rrweb directly. The v2 ecosystem (agent / fleet / forensic / browser-v2) used to live in three separate packages and is now folded into this one as subpath exports — opt-in via `INARIWATCH_CAPTURE_V2=true` or by importing the subpath directly. Bundlers tree-shake the unused subpaths out for non-opt-in users.",
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "web-vitals": "^4.2.0"
   }
 }
