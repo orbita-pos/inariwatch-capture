@@ -10,82 +10,114 @@
   },
   "exports": {
     ".": {
+      "edge-light": "./dist/edge/index.js",
+      "workerd": "./dist/edge/index.js",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./auto": {
+      "edge-light": "./dist/edge/auto.js",
+      "workerd": "./dist/edge/auto.js",
       "types": "./dist/auto.d.ts",
       "import": "./dist/auto.js",
       "default": "./dist/auto.js"
     },
     "./next": {
+      "edge-light": "./dist/edge/plugins/next.js",
+      "workerd": "./dist/edge/plugins/next.js",
       "types": "./dist/plugins/next.d.ts",
       "import": "./dist/plugins/next.js",
       "default": "./dist/plugins/next.js"
     },
     "./vite": {
+      "edge-light": "./dist/edge/plugins/vite.js",
+      "workerd": "./dist/edge/plugins/vite.js",
       "types": "./dist/plugins/vite.d.ts",
       "import": "./dist/plugins/vite.js",
       "default": "./dist/plugins/vite.js"
     },
     "./webpack": {
+      "edge-light": "./dist/edge/plugins/webpack.js",
+      "workerd": "./dist/edge/plugins/webpack.js",
       "types": "./dist/plugins/webpack.d.ts",
       "import": "./dist/plugins/webpack.js",
       "require": "./dist/plugins/webpack.js",
       "default": "./dist/plugins/webpack.js"
     },
     "./nuxt": {
+      "edge-light": "./dist/edge/plugins/nuxt.js",
+      "workerd": "./dist/edge/plugins/nuxt.js",
       "types": "./dist/plugins/nuxt.d.ts",
       "import": "./dist/plugins/nuxt.js",
       "default": "./dist/plugins/nuxt.js"
     },
     "./browser": {
+      "edge-light": "./dist/edge/browser.js",
+      "workerd": "./dist/edge/browser.js",
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.js",
       "default": "./dist/browser.js"
     },
     "./client": {
+      "edge-light": "./dist/edge/client-entry.js",
+      "workerd": "./dist/edge/client-entry.js",
       "types": "./dist/client-entry.d.ts",
       "import": "./dist/client-entry.js",
       "default": "./dist/client-entry.js"
     },
     "./shield": {
+      "edge-light": "./dist/edge/shield.js",
+      "workerd": "./dist/edge/shield.js",
       "types": "./dist/shield/index.d.ts",
       "import": "./dist/shield/index.js",
       "default": "./dist/shield/index.js"
     },
     "./agent": {
+      "edge-light": "./dist/edge/agent.js",
+      "workerd": "./dist/edge/agent.js",
       "types": "./dist/agent/index.d.ts",
       "import": "./dist/agent/index.js",
       "default": "./dist/agent/index.js"
     },
     "./fleet": {
+      "edge-light": "./dist/edge/fleet.js",
+      "workerd": "./dist/edge/fleet.js",
       "types": "./dist/fleet/index.d.ts",
       "import": "./dist/fleet/index.js",
       "default": "./dist/fleet/index.js"
     },
     "./forensic": {
+      "edge-light": "./dist/edge/forensic.js",
+      "workerd": "./dist/edge/forensic.js",
       "types": "./dist/forensic/index.d.ts",
       "import": "./dist/forensic/index.js",
       "default": "./dist/forensic/index.js"
     },
     "./browser-v2": {
+      "edge-light": "./dist/edge/browser-v2.js",
+      "workerd": "./dist/edge/browser-v2.js",
       "types": "./dist/browser-v2/index.d.ts",
       "import": "./dist/browser-v2/index.js",
       "default": "./dist/browser-v2/index.js"
     },
     "./browser-v2/auto": {
+      "edge-light": "./dist/edge/browser-v2-auto.js",
+      "workerd": "./dist/edge/browser-v2-auto.js",
       "types": "./dist/browser-v2/auto.d.ts",
       "import": "./dist/browser-v2/auto.js",
       "default": "./dist/browser-v2/auto.js"
     },
     "./feedback": {
+      "edge-light": "./dist/edge/feedback.js",
+      "workerd": "./dist/edge/feedback.js",
       "types": "./dist/feedback/index.d.ts",
       "import": "./dist/feedback/index.js",
       "default": "./dist/feedback/index.js"
     },
     "./performance": {
+      "edge-light": "./dist/edge/performance.js",
+      "workerd": "./dist/edge/performance.js",
       "types": "./dist/performance/index.d.ts",
       "import": "./dist/performance/index.js",
       "default": "./dist/performance/index.js"
@@ -99,7 +131,10 @@
   "sideEffects": [
     "./dist/auto.js",
     "./dist/browser.js",
-    "./dist/shield/index.js"
+    "./dist/shield/index.js",
+    "./dist/edge/auto.js",
+    "./dist/edge/browser.js",
+    "./dist/edge/browser-v2-auto.js"
   ],
   "scripts": {
     "build": "tsc",
@@ -137,7 +172,7 @@
       "optional": true
     }
   },
-  "//": "rrweb stays as an optional peer solely because `session.ts` (the legacy 60s ring buffer attached to errors) still uses it. Full Replay V2 moved to @inariwatch/capture-replay which depends on rrweb directly. The v2 ecosystem (agent / fleet / forensic / browser-v2) used to live in three separate packages and is now folded into this one as subpath exports — opt-in via `INARIWATCH_CAPTURE_V2=true` or by importing the subpath directly. Bundlers tree-shake the unused subpaths out for non-opt-in users.",
+  "//": "Edge Runtime safety: every public subpath has an `edge-light` / `workerd` conditional pointing at `dist/edge/<name>.js`, a no-op stub. Next.js Edge Runtime, Cloudflare Workers, and Vercel Edge Functions resolve these conditions and get a stub SDK that compiles cleanly. Node + browser bundlers fall through to the real implementation. rrweb / web-vitals stay as optional peers — only loaded when the user opts into replay or performance.",
   "devDependencies": {
     "@types/node": "^25.5.0",
     "typescript": "^5.5.0",
