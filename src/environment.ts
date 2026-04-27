@@ -19,9 +19,9 @@ export function getEnvironmentContext(): EnvironmentContext | undefined {
     // Runtime" even though our runtime guard above ensures the code never
     // runs in edge.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const req = (0, eval)("require") as (m: string) => any
+    const req = ((globalThis as any).require as (m: string) => any)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const proc = (0, eval)("process") as any
+    const proc = ((globalThis as any).process as any)
     const os = req("os")
     const mem = proc.memoryUsage()
 

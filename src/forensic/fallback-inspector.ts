@@ -184,7 +184,7 @@ export async function install(hook: ForensicHook, options: ForensicOptions = {})
 }
 
 async function handlePaused(s: Session, event: CdpPaused): Promise<void> {
-  const startNs = process.hrtime.bigint()
+  const startNs = ((globalThis as any).process as any).hrtime.bigint()
   const startMs = Date.now()
   const opts = activeOptions
   const deadline = startMs + opts.captureBudgetMs
@@ -213,11 +213,11 @@ async function handlePaused(s: Session, event: CdpPaused): Promise<void> {
   synthetic.name = "ForensicCapturedException"
   errorObj ??= synthetic
 
-  const endNs = process.hrtime.bigint()
+  const endNs = ((globalThis as any).process as any).hrtime.bigint()
   const capture: ForensicCapture = {
     frames,
     error: errorObj,
-    pid: process.pid,
+    pid: ((globalThis as any).process as any).pid,
     tid: threadId,
     tsNs: startNs,
     source: "inspector",

@@ -40,7 +40,8 @@ export async function prepareV2Payload(
   // Enrich with source context + git blame (best-effort).
   try {
     if (event.body && (!event.sourceContext || event.sourceContext.length === 0)) {
-      const { getSourceContext } = await import("./source-context.js")
+      const sourceContextMod = "./source-context.js"
+      const { getSourceContext } = await import(/* webpackIgnore: true */ sourceContextMod)
       const ctx = getSourceContext(event.body)
       if (ctx.length > 0) event.sourceContext = ctx
     }
@@ -110,7 +111,8 @@ export async function prepareV2Payload(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodeCrypto: any = await import(/* webpackIgnore: true */ pkg)
     merkleRoot = computeEvidenceMerkleRootSync(unsigned.evidence, nodeCrypto)
-    const { getOrCreateKeypair, signReceiptId } = await import("./signing.js")
+    const signingMod = "./signing.js"
+    const { getOrCreateKeypair, signReceiptId } = await import(/* webpackIgnore: true */ signingMod)
     const kp = getOrCreateKeypair()
     const sig = signReceiptId(merkleRoot, kp)
     signaturePayload = {
@@ -139,14 +141,10 @@ export async function prepareV2Payload(
   return v2
 }
 
-/** Resolve the active payload version from env at call time (lets tests flip it). */
-export function resolvePayloadVersion(): "1" | "2" {
-  const env =
-    typeof process !== "undefined" && process.env ? process.env : ({} as Record<string, string | undefined>)
-  const v =
-    env.CAPTURE_PAYLOAD_VERSION ?? env.INARIWATCH_PAYLOAD_VERSION ?? "1"
-  return v === "2" ? "2" : "1"
-}
+// Re-exported for back-compat with anything that grabbed it from this module.
+// New code should import from "./payload-version.js" directly to avoid
+// pulling the v2-emit chunk (and its Node-only deps) into client / Edge code.
+export { resolvePayloadVersion } from "./payload-version.js"
 
 function intentCompilerEnabled(): boolean {
   const env =

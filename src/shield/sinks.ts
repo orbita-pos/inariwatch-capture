@@ -28,7 +28,7 @@ export function hookSinks(config: ShieldConfig, report: ReportFn): void {
 function hookPg(config: ShieldConfig, report: ReportFn): void {
   if (hooked.has("pg")) return
   try {
-    const pg = (0, eval)("require")("pg")
+    const pg = ((globalThis as any).require as (m: string) => any)("pg")
 
     // Hook Client.query
     const origClientQuery = pg.Client.prototype.query
@@ -63,7 +63,7 @@ function hookPg(config: ShieldConfig, report: ReportFn): void {
 function hookMysql2(config: ShieldConfig, report: ReportFn): void {
   if (hooked.has("mysql2")) return
   try {
-    const mysql2 = (0, eval)("require")("mysql2")
+    const mysql2 = ((globalThis as any).require as (m: string) => any)("mysql2")
     const Connection = mysql2.Connection?.prototype ?? Object.getPrototypeOf(mysql2.createConnection({}))
 
     if (Connection.query) {
@@ -101,7 +101,7 @@ function hookMysql2(config: ShieldConfig, report: ReportFn): void {
 function hookChildProcess(config: ShieldConfig, report: ReportFn): void {
   if (hooked.has("child_process")) return
   try {
-    const cp = (0, eval)("require")("child_process")
+    const cp = ((globalThis as any).require as (m: string) => any)("child_process")
 
     for (const fn of ["exec", "execSync"] as const) {
       const orig = cp[fn]
@@ -142,7 +142,7 @@ function hookChildProcess(config: ShieldConfig, report: ReportFn): void {
 function hookFs(config: ShieldConfig, report: ReportFn): void {
   if (hooked.has("fs")) return
   try {
-    const fs = (0, eval)("require")("fs")
+    const fs = ((globalThis as any).require as (m: string) => any)("fs")
 
     for (const fn of ["readFile", "readFileSync", "writeFile", "writeFileSync"] as const) {
       const orig = fs[fn]

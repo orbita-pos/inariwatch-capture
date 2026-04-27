@@ -30,7 +30,7 @@ const IS_NODE = (() => {
   if (typeof window !== "undefined") return false
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const proc = (0, eval)("process") as any
+    const proc = ((globalThis as any).process as any)
     return !!proc?.versions?.node
   } catch {
     return false
@@ -47,7 +47,7 @@ function reportThreat(ctx: SecurityContext): void {
     // path at build time (we're a published package; path walks happen at
     // runtime against the installed dist).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const req = (0, eval)("require") as (m: string) => any
+    const req = ((globalThis as any).require as (m: string) => any)
     const { captureException } = req("../client.js")
 
     const title = buildSecurityTitle(ctx)

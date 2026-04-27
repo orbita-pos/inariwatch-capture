@@ -6,7 +6,7 @@ import { getEnvironmentContext } from "./environment.js"
 import { getBreadcrumbs, initBreadcrumbs } from "./breadcrumbs.js"
 import { getUser, getTags, getRequestContext } from "./scope.js"
 import { initFullTrace, getSessionId } from "./fulltrace.js"
-import { resolvePayloadVersion } from "./v2-emit.js"
+import { resolvePayloadVersion } from "./payload-version.js"
 
 let globalTransport: Transport | null = null
 let globalConfig: CaptureConfig | null = null
@@ -56,7 +56,12 @@ async function sendWithHooks(event: ErrorEvent): Promise<void> {
   // accepts v1 indefinitely, and a v2 build error falls back to v1 silently.
   if (resolvePayloadVersion() === "2") {
     try {
-      const { prepareV2Payload } = await import("./v2-emit.js")
+      // String-variable indirection defeats Turbopack's static analysis of
+      // dynamic imports (which still walks them by default and pulls
+      // v2-emit's Node-only deps — signing, source-context — into Edge
+      // bundles even though this branch never executes there).
+      const v2EmitMod = "./v2-emit.js"
+      const { prepareV2Payload } = await import(/* webpackIgnore: true */ v2EmitMod)
       const wire = await prepareV2Payload(current)
       // Transport's `send` types `ErrorEvent`; the v2 shape is structurally
       // wider but the transport only reads `fingerprint` for retry dedup

@@ -17,7 +17,7 @@ export interface TaintSource {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let asyncStorage: any = null
 try {
-  const { AsyncLocalStorage } = (0, eval)("require")("node:async_hooks")
+  const { AsyncLocalStorage } = ((globalThis as any).require as (m: string) => any)("node:async_hooks")
   asyncStorage = new AsyncLocalStorage()
 } catch {
   // Edge runtime — fallback to global store

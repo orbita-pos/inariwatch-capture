@@ -5,7 +5,7 @@ import type { ForensicHook, ForensicOptions } from "./types.js"
  *
  * When the user runs the `@inariwatch/node-forensic` binary distribution
  * (forked Node with v8::forensics compiled in), `process.versions.iw_forensic`
- * is set and a native module is exposed at `process.binding("iw_forensic")`
+ * is set and a native module is exposed at `((globalThis as any).process as any)?.binding?.("iw_forensic")`
  * (or via `node:inariwatch-forensic` later — TBD with Node core patch).
  *
  * On stock Node this file always reports unavailable so the caller falls
@@ -20,11 +20,15 @@ interface ForkBinding {
 }
 
 function getBinding(): ForkBinding | null {
-  const versions = process.versions as Record<string, string | undefined>
+  // Access process via globalThis so Turbopack / Edge Runtime static
+  // analysis doesn't flag `process.binding` (forbidden Node API in Edge).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const proc = (globalThis as any).process as any
+  if (!proc) return null
+  const versions = (proc.versions ?? {}) as Record<string, string | undefined>
   if (!versions.iw_forensic) return null
   // Not wired on stock Node. Real implementation lands with the fork patch.
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  const binding = (process as unknown as { binding?: (name: string) => unknown }).binding?.("iw_forensic")
+  const binding = proc.binding?.("iw_forensic")
   return (binding as ForkBinding | null) ?? null
 }
 

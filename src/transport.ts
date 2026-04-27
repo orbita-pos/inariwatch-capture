@@ -82,7 +82,10 @@ const SEVERITY_COLORS: Record<string, string> = {
 // without extra config. Override via INARIWATCH_DEV_LOG_PATH.
 async function appendDevLog(event: ErrorEvent): Promise<void> {
   if (typeof window !== "undefined") return
-  const enabled = process.env.INARIWATCH_DEV_LOG === "1" || !!process.env.INARIWATCH_DEV_LOG_PATH
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const proc = (globalThis as any).process as any
+  if (!proc?.env) return
+  const enabled = proc.env.INARIWATCH_DEV_LOG === "1" || !!proc.env.INARIWATCH_DEV_LOG_PATH
   if (!enabled) return
   try {
     const pkg = "node:fs/promises"
@@ -91,7 +94,7 @@ async function appendDevLog(event: ErrorEvent): Promise<void> {
     const fs: any = await import(/* webpackIgnore: true */ pkg)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const path: any = await import(/* webpackIgnore: true */ pathPkg)
-    const filePath = process.env.INARIWATCH_DEV_LOG_PATH ?? path.join(process.cwd(), ".inariwatch", "errors.jsonl")
+    const filePath = proc.env.INARIWATCH_DEV_LOG_PATH ?? path.join(proc.cwd(), ".inariwatch", "errors.jsonl")
     await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.appendFile(filePath, JSON.stringify(event) + "\n", "utf8")
   } catch {

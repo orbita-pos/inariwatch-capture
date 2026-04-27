@@ -95,11 +95,11 @@ function sessionFilePath(pid: number): string {
 }
 
 function nowNs(): bigint {
-  return process.hrtime.bigint()
+  return ((globalThis as any).process as any).hrtime.bigint()
 }
 
 function isLinux(): boolean {
-  return process.platform === "linux"
+  return ((globalThis as any).process as any)?.platform === "linux"
 }
 
 /**
@@ -168,7 +168,7 @@ export function installSessionFile(ctx: SessionContext): string | null {
     )
   }
 
-  const pid = process.pid
+  const pid = ((globalThis as any).process as any).pid
 
   if (!isLinux()) {
     // Track install for symmetry — uninstall() should still succeed.
@@ -189,7 +189,9 @@ export function installSessionFile(ctx: SessionContext): string | null {
     exitListener = handler
     // `exit` fires on normal process completion, not on SIGKILL — for
     // SIGKILL the agent's stale-record check catches the orphan.
-    process.on("exit", handler)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const procOn = (globalThis as any).process as any
+    procOn?.on?.("exit", handler)
   }
 
   return written ? filePath : null
@@ -228,7 +230,7 @@ export function updateRequestContext(opts: {
   const next: SessionContext = { sessionId }
   if (opts.requestId !== undefined) next.requestId = opts.requestId
   if (opts.userId !== undefined) next.userId = opts.userId
-  return writeSessionFile(process.pid, next)
+  return writeSessionFile(((globalThis as any).process as any).pid, next)
 }
 
 /**
