@@ -177,5 +177,8 @@
     "@types/node": "^25.5.0",
     "typescript": "^5.5.0",
     "web-vitals": "^4.2.0"
+  },
+  "dependencies": {
+    "@inariwatch/capture": "^0.10.2"
   }
 }
