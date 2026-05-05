@@ -18,11 +18,22 @@
  */
 
 import { extractGitInfo } from "../git.js"
+import { InariwatchDebugIdWebpackPlugin } from "./webpack-debug-id-plugin.js"
 
 type WebpackConfig = {
   externals?: unknown
   target?: string | string[] | false
+  plugins?: unknown[]
   [key: string]: unknown
+}
+
+export interface WithInariWatchWebpackOptions {
+  /**
+   * Emit TC39 ecma426 debug-id magic comments + sourcemap fields per
+   * JS asset. Default: true. Disable if you have a custom symbolicator
+   * that breaks on the trailing magic comment.
+   */
+  injectDebugIds?: boolean
 }
 
 function isNodeTarget(target: WebpackConfig["target"]): boolean {
@@ -36,7 +47,10 @@ function isNodeTarget(target: WebpackConfig["target"]): boolean {
   return false
 }
 
-export function withInariWatchWebpack<T extends WebpackConfig>(config: T = {} as T): T {
+export function withInariWatchWebpack<T extends WebpackConfig>(
+  config: T = {} as T,
+  opts: WithInariWatchWebpackOptions = {},
+): T {
   const gitEnv = extractGitInfo()
 
   // 1. Inject git env at process.env — available to anything else in the
@@ -45,14 +59,28 @@ export function withInariWatchWebpack<T extends WebpackConfig>(config: T = {} as
     if (!process.env[key]) process.env[key] = value
   }
 
-  // 2. Only externalize capture on server builds. On client builds, capture
+  // 2. Append the debug-id plugin to the user's plugin chain. Runs late
+  //    in the asset pipeline (PROCESS_ASSETS_STAGE_REPORT) so minifiers
+  //    have already finished. Skipped on Node-target builds — debug IDs
+  //    are a client-side symbolication concern, irrelevant to server JS.
+  const debugIdsEnabled = opts.injectDebugIds !== false
+  let configWithPlugin: T = config
+  if (debugIdsEnabled && !isNodeTarget(config.target)) {
+    const existingPlugins = Array.isArray(config.plugins) ? config.plugins : []
+    configWithPlugin = {
+      ...config,
+      plugins: [...existingPlugins, new InariwatchDebugIdWebpackPlugin()],
+    }
+  }
+
+  // 3. Only externalize capture on server builds. On client builds, capture
   //    uses the Web Crypto API fallback and bundles fine.
-  if (!isNodeTarget(config.target)) {
-    return config
+  if (!isNodeTarget(configWithPlugin.target)) {
+    return configWithPlugin
   }
 
   const ourExternal = { "@inariwatch/capture": "commonjs @inariwatch/capture" }
-  const existing = config.externals
+  const existing = configWithPlugin.externals
   let externals: unknown
 
   if (existing === undefined || existing === null) {
@@ -66,7 +94,7 @@ export function withInariWatchWebpack<T extends WebpackConfig>(config: T = {} as
     externals = [existing, ourExternal]
   }
 
-  return { ...config, externals }
+  return { ...configWithPlugin, externals }
 }
 
 export default withInariWatchWebpack

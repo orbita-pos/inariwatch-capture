@@ -20,6 +20,7 @@
  */
 
 import { extractGitInfo } from "../git.js"
+import { inariwatchVite } from "./vite.js"
 
 type NuxtRuntimeConfig = {
   public?: Record<string, unknown>
@@ -34,9 +35,15 @@ type NuxtNitroConfig = {
   [key: string]: unknown
 }
 
+type NuxtViteConfig = {
+  plugins?: unknown[]
+  [key: string]: unknown
+}
+
 type NuxtOptions = {
   runtimeConfig?: NuxtRuntimeConfig
   nitro?: NuxtNitroConfig
+  vite?: NuxtViteConfig
   [key: string]: unknown
 }
 
@@ -83,6 +90,20 @@ const inariwatchNuxt: NuxtModule = async function (_options, nuxt) {
   externals.external = externals.external ?? []
   if (!externals.external.includes("@inariwatch/capture")) {
     externals.external.push("@inariwatch/capture")
+  }
+
+  // 4. Inject TC39 debug-IDs into Nuxt's Vite-built client chunks. Nuxt 3
+  //    builds the client with Vite, so the same `inariwatchVite()` plugin
+  //    that ships for raw Vite users gives us debug-IDs here for free.
+  //    Idempotent — skips if a plugin with our name is already registered
+  //    (the user might have added it manually to nuxt.options.vite.plugins).
+  nuxt.options.vite = nuxt.options.vite ?? {}
+  const vitePlugins = (nuxt.options.vite.plugins = nuxt.options.vite.plugins ?? [])
+  const alreadyRegistered = vitePlugins.some(
+    (p) => typeof p === "object" && p !== null && (p as { name?: string }).name === "inariwatch-capture",
+  )
+  if (!alreadyRegistered) {
+    vitePlugins.push(inariwatchVite())
   }
 }
 

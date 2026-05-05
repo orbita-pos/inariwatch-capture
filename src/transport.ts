@@ -31,7 +31,7 @@ export function parseDSN(dsn: string): ParsedDSN {
   return { endpoint: url.toString(), secretKey, isLocal: false }
 }
 
-async function signPayload(body: string, secret: string): Promise<string> {
+async function signPayload(body: string | Uint8Array, secret: string): Promise<string> {
   // Node path first (faster + no async crypto.subtle). Skip on browsers —
   // `node:crypto` is not resolvable there.
   if (typeof window === "undefined") {
@@ -41,7 +41,13 @@ async function signPayload(body: string, secret: string): Promise<string> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const nodeCrypto: any = await import(/* webpackIgnore: true */ pkg)
       if (nodeCrypto.createHmac) {
-        return `sha256=${nodeCrypto.createHmac("sha256", secret).update(body, "utf8").digest("hex")}`
+        const hmac = nodeCrypto.createHmac("sha256", secret)
+        if (typeof body === "string") {
+          hmac.update(body, "utf8")
+        } else {
+          hmac.update(body)
+        }
+        return `sha256=${hmac.digest("hex")}`
       }
     } catch {
       // Fallback: Web Crypto API
@@ -51,11 +57,61 @@ async function signPayload(body: string, secret: string): Promise<string> {
   const encoder = new TextEncoder()
   const keyData = encoder.encode(secret)
   const key = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
-  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(body))
+  const data = typeof body === "string" ? encoder.encode(body) : body
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sig = await crypto.subtle.sign("HMAC", key, data as any)
   const hex = Array.from(new Uint8Array(sig))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
   return `sha256=${hex}`
+}
+
+// Brotli compression for outbound POST bodies. Opt-in via env var
+// (`INARIWATCH_COMPRESSION=br`) or `init({ compression: "br" })`. Default
+// off so a fresh install is byte-identical with 0.11.x — flipping the
+// default depends on every user's ingest endpoint understanding
+// `Content-Encoding: br`. Once the InariWatch server-side rollout for
+// the public dashboard ships, the default may flip; until then we
+// preserve the conservative posture from `feedback_no_breaking_changes`.
+//
+// Compression skipped when:
+//   - Caller didn't opt in.
+//   - `node:zlib` isn't reachable (browsers, edge runtimes).
+//   - Payload is below the 1 KB threshold (overhead exceeds savings).
+//   - `brotliCompressSync` is missing (Node <11; we don't formally
+//     support that, but we degrade silently rather than crashing).
+async function maybeCompress(
+  bodyText: string,
+  algo: "br" | undefined,
+): Promise<{ body: Uint8Array | string; encoding?: "br" }> {
+  if (algo !== "br") return { body: bodyText }
+  if (typeof window !== "undefined") return { body: bodyText }
+  if (bodyText.length < 1024) return { body: bodyText }
+  try {
+    const pkg = "node:zlib"
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const zlib: any = await import(/* webpackIgnore: true */ pkg)
+    if (typeof zlib.brotliCompressSync !== "function") return { body: bodyText }
+    const compressed: Uint8Array = zlib.brotliCompressSync(Buffer.from(bodyText, "utf8"))
+    // Only commit to the compressed wire if it actually saved at least
+    // 10% of the bytes. Tiny gains aren't worth the decompression cost
+    // on the server.
+    if (compressed.byteLength >= bodyText.length * 0.9) return { body: bodyText }
+    return { body: compressed, encoding: "br" }
+  } catch {
+    return { body: bodyText }
+  }
+}
+
+function resolveCompression(config: CaptureConfig): "br" | undefined {
+  // Caller-set takes precedence over env.
+  if (config.compression === "br" || config.compression === false) {
+    return config.compression === "br" ? "br" : undefined
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const proc = (globalThis as any).process as any
+  const env = proc?.env?.INARIWATCH_COMPRESSION
+  return env === "br" ? "br" : undefined
 }
 
 export interface Transport {
@@ -143,12 +199,23 @@ export function createTransport(config: CaptureConfig, parsed: ParsedDSN): Trans
     if (config.debug) console.warn(`[@inariwatch/capture] ${msg}`)
   }
 
+  const compressionAlgo = resolveCompression(config)
+
   async function sendOne(event: ErrorEvent): Promise<boolean> {
-    const body = JSON.stringify(event)
+    const json = JSON.stringify(event)
     const headers: Record<string, string> = { "Content-Type": "application/json" }
 
+    // Apply compression BEFORE HMAC so the server validates the wire bytes
+    // it actually received. Server reject path stays cheap: HMAC fails
+    // before we burn CPU on decompression.
+    const compressed = await maybeCompress(json, compressionAlgo)
+    const wireBody = compressed.body
+    if (compressed.encoding) {
+      headers["Content-Encoding"] = compressed.encoding
+    }
+
     if (!parsed.isLocal && parsed.secretKey) {
-      headers["x-capture-signature"] = await signPayload(body, parsed.secretKey)
+      headers["x-capture-signature"] = await signPayload(wireBody, parsed.secretKey)
     }
 
     // Zero-retention mode (Track E pieza 11). The flag is read once at
@@ -163,7 +230,12 @@ export function createTransport(config: CaptureConfig, parsed: ParsedDSN): Trans
     }
 
     try {
-      const res = await fetch(parsed.endpoint, { method: "POST", headers, body })
+      // Cast required because Node's `Uint8Array<ArrayBufferLike>` (the
+      // shape `Buffer` returns under recent @types/node) doesn't unify
+      // with the lib.dom.d.ts `BodyInit` strict `Uint8Array<ArrayBuffer>`.
+      // Runtime accepts both — only the type system is being precious.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await fetch(parsed.endpoint, { method: "POST", headers, body: wireBody as any })
       if (res.ok) {
         if (zeroRetention) {
           // Best-effort: parse + persist the tombstone. Never blocks the

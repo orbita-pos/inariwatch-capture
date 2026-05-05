@@ -283,6 +283,64 @@ init({
 | `INARIWATCH_SUBSTRATE` | Set to `"true"` to enable I/O recording |
 | `INARIWATCH_REDACT` | Set to `"true"` to enable in-process PII redaction |
 
+## Source-map debug IDs (TC39 ecma426)
+
+All four bundler plugins (Vite, Webpack, Next.js, Nuxt) emit TC39
+[debug-id](https://github.com/tc39/ecma426/blob/main/proposals/debug-id.md)
+magic comments + sourcemap fields per chunk by default. A debug ID is a
+deterministic UUIDv5 computed from the chunk's content, so the SDK's
+runtime + the symbolicator both arrive at the same ID without any
+release-version coordination — and it survives file renames,
+hash-suffixed asset paths, and CDN cache busts.
+
+Opt out per-plugin if your custom symbolicator can't tolerate the
+trailing magic comment:
+
+```typescript
+// Vite
+inariwatchVite({ injectDebugIds: false })
+
+// Webpack
+withInariWatchWebpack(config, { injectDebugIds: false })
+
+// Next.js
+withInariWatch(nextConfig, { injectDebugIds: false })
+```
+
+Next 15+ Turbopack: detected automatically; the debug-id step is a
+no-op there (Turbopack's plugin API isn't webpack-compatible). The
+rest of the plugin's work — git env injection, SSR external marking —
+continues to function. A native Turbopack hook is on the roadmap.
+
+## Wire compression (opt-in)
+
+Set `INARIWATCH_COMPRESSION=br` (or `init({ compression: "br" })`) to
+brotli-compress payloads ≥ 1 KB before the POST. Saves 70-85% of
+bandwidth on large events (Substrate-attached crashes, big
+breadcrumb timelines). Below the threshold, or when compression
+wouldn't beat raw JSON by ≥ 10%, the SDK skips compression
+automatically. Browser + edge runtimes silently skip too (no
+`node:zlib`). The InariWatch dashboard endpoint understands
+`Content-Encoding: br` as of v0.12.0 — for self-hosted ingest
+endpoints, verify yours decompresses before flipping the flag.
+
+## Diagnose your install
+
+```bash
+npx @inariwatch/capture doctor
+```
+
+Runs ten read-only checks against your project — Node version, framework
+detection, plugin wired, `instrumentation.ts` set up, `INARIWATCH_DSN`
+resolved, DSN endpoint reachable, dev-log state, MCP IDE config. Each
+result is `ok` / `info` / `warn` / `fail` with a one-line hint when
+something is off. Exits `1` on failures, `0` otherwise — safe to wire
+into CI:
+
+```bash
+npx @inariwatch/capture doctor --offline    # skip the network probe
+```
+
 ## IDE integration via MCP (Cursor / Claude Code / Windsurf / Copilot Agent)
 
 Run your app with the dev log on:

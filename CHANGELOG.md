@@ -3,6 +3,83 @@
 All notable changes to the SDK. Older releases pre-date this file —
 see git history for `0.10.x` and earlier.
 
+## 0.12.0 — 2026-05-05
+
+> Sprint 1 batched release — five capture-side items shipped, plus
+> coordinated `web/` server hardening (S1-1 decompression + S1-5
+> Ed25519-required gate) that lives in the monorepo and ships via the
+> next Hetzner deploy. S1-2 (DefinePlugin tree-shake flags) was
+> DROPPED after measurement showed the browser bundle is already
+> 2.5 KB gzipped post-0.11.1 — already 10× lighter than Sentry's
+> tree-shaken errors-only build, so the premise of the work was gone.
+
+### Added
+- **TC39 ecma426 debug-IDs across all four bundler plugins** (Vite /
+  Webpack / Next.js / Nuxt). Each plugin computes a deterministic
+  UUIDv5 from each emitted chunk's content + a stable namespace,
+  emits the `//# debugId=<uuid>` magic comment at the bottom of the
+  chunk, and writes the same `debugId` field into the attached source
+  map. This is the modern alternative to the brittle "release
+  version + abs_path" model used by older error monitors — debug IDs
+  are content-addressed, so they survive file renames,
+  hash-suffixed asset paths, and CDN cache busts.
+  - `inariwatchVite()` installs a Rollup `renderChunk` hook.
+  - `withInariWatchWebpack()` appends an `InariwatchDebugIdWebpackPlugin`
+    to the user's `plugins[]`. Skipped on Node-target builds (debug IDs
+    are a client-symbolication concern; server JS goes through Node
+    directly).
+  - `withInariWatch()` (Next.js) wraps the user's `webpack(config)`
+    hook to push the same plugin into the CLIENT compilation only.
+    Detects Turbopack via the `turbopack` config key (Next 15+) or the
+    legacy `experimental.turbo` flag and silently disables the
+    debug-id work — Turbopack's plugin API isn't webpack-compatible;
+    a native Turbopack hook is tracked as a follow-up.
+  - The Nuxt module pushes `inariwatchVite()` into
+    `nuxt.options.vite.plugins` so the same Vite-side machinery
+    powers Nuxt 3 builds.
+  - Opt out per-plugin with `{ injectDebugIds: false }`. The shared
+    helpers (`computeDebugId` / `injectDebugIdComment` /
+    `injectDebugIdIntoSourceMap`) live in `src/plugins/debug-id.ts`.
+- **Brotli compression for the wire payload** (opt-in). Set
+  `init({ compression: "br" })` or `INARIWATCH_COMPRESSION=br` to
+  shrink large events with brotli before the POST. Saves 70-85% of
+  bandwidth on payloads ≥ 1 KB. Below the 1 KB threshold, or when the
+  compressed body wouldn't beat the original by ≥ 10%, the SDK falls
+  back to raw JSON automatically. Browser + edge runtimes silently
+  skip compression (no `node:zlib` available). The HMAC signature is
+  computed over the WIRE bytes — server-side reject path stays cheap
+  (HMAC fails before any decompression CPU is burned). Default off
+  for backward compatibility; flip on once your DSN endpoint
+  understands `Content-Encoding: br` (the InariWatch dashboard
+  endpoint does as of this release).
+- **`npx @inariwatch/capture doctor`** — non-destructive self-diagnostic.
+- **`npx @inariwatch/capture doctor`** — non-destructive self-diagnostic.
+  Runs in <1 second offline (use `--offline` to skip the DSN reachability
+  HEAD probe). Ten checks, each one of `ok` / `info` / `warn` / `fail`
+  with a one-line hint when something is off:
+  - Node version (>= 18)
+  - `package.json` present + `@inariwatch/capture` declared
+  - Framework auto-detected (Next / Nuxt / Vite / Remix / SvelteKit /
+    Astro / Express / Fastify / Hono / plain Node)
+  - Framework plugin wired in the right config file
+    (`withInariWatch` / `inariwatchVite` / `@inariwatch/capture/nuxt` /
+    `--import @inariwatch/capture/auto`)
+  - Next.js `instrumentation.ts` exports `onRequestError` (warn if the
+    file imports `capture/auto` but forgot the handler — the most common
+    half-finished onboarding state)
+  - `INARIWATCH_DSN` resolved (process.env > .env.local > .env)
+  - DSN parses as a valid URL
+  - DSN endpoint reachable (HEAD probe, 5s timeout — only the hostname,
+    never the secret-bearing URL, so no integration secrets leak)
+  - Dev-log JSONL state (event count + latest event age) when
+    `INARIWATCH_DEV_LOG=1` is on
+  - MCP server registered in Cursor (`~/.cursor/mcp.json`) or Claude
+    Code (`~/.config/claude/mcp.json`, `~/.claude/mcp.json`)
+
+  Exit code is `0` when no checks fail, `1` when any do. Warnings and
+  info notes never affect exit, so it's safe to wire into CI as
+  `npx @inariwatch/capture doctor --offline`.
+
 ## 0.11.1 — 2026-05-05
 
 ### Added
