@@ -614,12 +614,23 @@ async function main() {
     return
   }
 
+  // The `doctor` command runs a non-destructive self-diagnostic.
+  // Exits 0 on green, 1 on any failure. Pure read-only against the
+  // local project + a single HEAD probe against the DSN endpoint.
+  if (command === "doctor") {
+    const { runDoctor } = await import("./cli/doctor.js")
+    const offline = args.includes("--offline")
+    const exit = await runDoctor({ offline })
+    process.exit(exit)
+  }
+
   log(`\n${BOLD}@inariwatch/capture${RESET}\n`)
 
   if (command !== "init") {
     log(`${BOLD}Usage:${RESET}`)
-    log(`  npx @inariwatch/capture        ${DIM}# Auto-setup in your project${RESET}`)
-    log(`  npx @inariwatch/capture mcp    ${DIM}# Run the MCP server (stdio) for IDE integration${RESET}`)
+    log(`  npx @inariwatch/capture           ${DIM}# Auto-setup in your project${RESET}`)
+    log(`  npx @inariwatch/capture mcp       ${DIM}# Run the MCP server (stdio) for IDE integration${RESET}`)
+    log(`  npx @inariwatch/capture doctor    ${DIM}# Self-diagnose your install (use --offline to skip network)${RESET}`)
     log(``)
     return
   }

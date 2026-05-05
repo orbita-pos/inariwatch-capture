@@ -283,6 +283,49 @@ init({
 | `INARIWATCH_SUBSTRATE` | Set to `"true"` to enable I/O recording |
 | `INARIWATCH_REDACT` | Set to `"true"` to enable in-process PII redaction |
 
+## Source-map debug IDs (TC39 ecma426)
+
+The Vite plugin (`inariwatchVite`) emits TC39 [debug-id](https://github.com/tc39/ecma426/blob/main/proposals/debug-id.md)
+magic comments + sourcemap fields per chunk by default. A debug ID is a
+deterministic UUIDv5 computed from the chunk's content, so the SDK's
+runtime + the symbolicator both arrive at the same ID without any
+release-version coordination — and it survives file renames, hash-suffixed
+asset paths, and CDN cache busts.
+
+Opt out only if your custom symbolicator can't tolerate the trailing
+magic comment:
+
+```typescript
+import { inariwatchVite } from "@inariwatch/capture/vite"
+
+export default defineConfig({
+  plugins: [inariwatchVite({ injectDebugIds: false })],
+})
+```
+
+Webpack, Next.js (Turbopack), and Nuxt support is in flight — each
+bundler's transform pipeline has its own quirks so they ship one at a
+time after testing. Until they land, those plugins skip the debug-id
+step (the rest of their work — git env injection, SSR external
+marking — continues to function).
+
+## Diagnose your install
+
+```bash
+npx @inariwatch/capture doctor
+```
+
+Runs ten read-only checks against your project — Node version, framework
+detection, plugin wired, `instrumentation.ts` set up, `INARIWATCH_DSN`
+resolved, DSN endpoint reachable, dev-log state, MCP IDE config. Each
+result is `ok` / `info` / `warn` / `fail` with a one-line hint when
+something is off. Exits `1` on failures, `0` otherwise — safe to wire
+into CI:
+
+```bash
+npx @inariwatch/capture doctor --offline    # skip the network probe
+```
+
 ## IDE integration via MCP (Cursor / Claude Code / Windsurf / Copilot Agent)
 
 Run your app with the dev log on:

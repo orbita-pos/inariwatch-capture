@@ -3,6 +3,63 @@
 All notable changes to the SDK. Older releases pre-date this file —
 see git history for `0.10.x` and earlier.
 
+## 0.12.0 — 2026-05-05
+
+> Sprint 1 batched release. Two items shipped here (`doctor` + Vite
+> debug-IDs); S1-1 (zstd) and S1-5 (unsigned-reject server hardening)
+> are deferred to a coordinated cross-repo PR that needs a `web/`
+> deploy alongside the SDK. S1-2 (DefinePlugin tree-shake flags) was
+> dropped after measurement showed the browser bundle is already
+> 2.5 KB gzipped post-0.11.1 — already 10× lighter than Sentry's
+> tree-shaken errors-only build, so the premise of the work was gone.
+
+### Added
+- **TC39 ecma426 debug-IDs in the Vite plugin.** The `inariwatchVite()`
+  plugin now installs a `renderChunk` hook that computes a
+  deterministic UUIDv5 from each chunk's content + a stable namespace,
+  emits the `//# debugId=<uuid>` magic comment at the bottom of the
+  chunk, and writes the same `debugId` field into the attached source
+  map. This is the modern alternative to the brittle "release
+  version + abs_path" model used by older error monitors — debug IDs
+  are content-addressed, so they survive file renames, hash-suffixed
+  asset paths, and CDN cache busts. Opt out with
+  `inariwatchVite({ injectDebugIds: false })` if you have a custom
+  symbolicator that breaks on the trailing magic comment. The shared
+  helper (`computeDebugId` / `injectDebugIdComment` /
+  `injectDebugIdIntoSourceMap`) lives in
+  `src/plugins/debug-id.ts` and is reusable from the other plugins
+  when they get the same treatment in a follow-up release. Webpack /
+  Next.js (Turbopack) / Nuxt are tracked as Sprint-2 follow-ups —
+  each bundler's transform pipeline has its own quirks (Turbopack
+  doesn't expose webpack's plugin API the same way) so we ship them
+  one at a time after testing.
+- **`npx @inariwatch/capture doctor`** — non-destructive self-diagnostic.
+  Runs in <1 second offline (use `--offline` to skip the DSN reachability
+  HEAD probe). Ten checks, each one of `ok` / `info` / `warn` / `fail`
+  with a one-line hint when something is off:
+  - Node version (>= 18)
+  - `package.json` present + `@inariwatch/capture` declared
+  - Framework auto-detected (Next / Nuxt / Vite / Remix / SvelteKit /
+    Astro / Express / Fastify / Hono / plain Node)
+  - Framework plugin wired in the right config file
+    (`withInariWatch` / `inariwatchVite` / `@inariwatch/capture/nuxt` /
+    `--import @inariwatch/capture/auto`)
+  - Next.js `instrumentation.ts` exports `onRequestError` (warn if the
+    file imports `capture/auto` but forgot the handler — the most common
+    half-finished onboarding state)
+  - `INARIWATCH_DSN` resolved (process.env > .env.local > .env)
+  - DSN parses as a valid URL
+  - DSN endpoint reachable (HEAD probe, 5s timeout — only the hostname,
+    never the secret-bearing URL, so no integration secrets leak)
+  - Dev-log JSONL state (event count + latest event age) when
+    `INARIWATCH_DEV_LOG=1` is on
+  - MCP server registered in Cursor (`~/.cursor/mcp.json`) or Claude
+    Code (`~/.config/claude/mcp.json`, `~/.claude/mcp.json`)
+
+  Exit code is `0` when no checks fail, `1` when any do. Warnings and
+  info notes never affect exit, so it's safe to wire into CI as
+  `npx @inariwatch/capture doctor --offline`.
+
 ## 0.11.1 — 2026-05-05
 
 ### Added
