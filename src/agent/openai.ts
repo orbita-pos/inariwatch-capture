@@ -16,7 +16,7 @@
  */
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1"
-const DEFAULT_MODEL = "gpt-5.4"
+const DEFAULT_MODEL = "gpt-4o-mini"
 const DEFAULT_DEADLINE_MS = 1500
 
 export interface ChatMessage {

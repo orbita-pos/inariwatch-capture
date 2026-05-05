@@ -2,7 +2,26 @@
  * Scope — request context, user context, and tags.
  * Uses AsyncLocalStorage for per-request isolation in Node.js.
  * Falls back to global state in edge runtime.
+ *
+ * ── Two-layer redaction model ────────────────────────────────────────────
+ *
+ * This module runs an always-on baseline scrub at `setRequestContext()`
+ * time. It (a) redacts headers whose name matches a sensitive pattern
+ * (`token` / `key` / `auth` / …), (b) wholesales sensitive body fields
+ * (matched against the shared `SENSITIVE_KEYS` set imported from
+ * `redact/keys.ts`), (c) trims oversized strings and arrays, and
+ * (d) hard-redacts forwarded-IP headers.
+ *
+ * The full `redact/` module is OPT-IN (`init({ redact: true })`) and
+ * complements this baseline: regex-based content scrubs (email, JWT,
+ * Stripe / AWS / GitHub keys, Luhn-validated card numbers), allowlists,
+ * hash mode, etc., over the whole event at send time.
+ *
+ * Both layers share `SENSITIVE_KEYS` so the field-name list cannot drift
+ * between them.
  */
+
+import { SENSITIVE_KEYS } from "./redact/keys.js"
 
 let asyncStorage: any = null
 try {
@@ -27,21 +46,14 @@ interface Scope {
 
 let globalScope: Scope = {}
 
-// Pattern-based: redact any header containing these words
+// Pattern-based: redact any header whose NAME contains one of these
+// substrings. Complements `SENSITIVE_KEYS` (which is exact-match only).
 const REDACT_HEADER_PATTERNS = ["token", "key", "secret", "auth", "credential", "password", "cookie", "session"]
 
 function shouldRedactHeader(name: string): boolean {
   const lower = name.toLowerCase()
   return REDACT_HEADER_PATTERNS.some((p) => lower.includes(p))
 }
-
-// Sensitive body fields to redact
-const REDACT_BODY_FIELDS = new Set([
-  "password", "passwd", "pass", "secret", "token", "api_key", "apiKey",
-  "access_token", "accessToken", "refresh_token", "refreshToken",
-  "credit_card", "creditCard", "card_number", "cardNumber", "cvv", "cvc",
-  "ssn", "social_security", "authorization",
-])
 
 function redactBody(body: unknown): unknown {
   if (body === null || body === undefined) return body
@@ -54,7 +66,7 @@ function redactBody(body: unknown): unknown {
   const safe: Record<string, unknown> = {}
   const obj = body as Record<string, unknown>
   for (const [k, v] of Object.entries(obj)) {
-    if (REDACT_BODY_FIELDS.has(k) || REDACT_BODY_FIELDS.has(k.toLowerCase())) {
+    if (SENSITIVE_KEYS.has(k.toLowerCase())) {
       safe[k] = "[REDACTED]"
     } else if (typeof v === "string" && v.length > 500) {
       safe[k] = v.slice(0, 500) + "...[truncated]"

@@ -603,11 +603,23 @@ function printDone(summary: Summary) {
 // --- Main ---
 
 async function main() {
+  // The `mcp` command is the stdio MCP server. Cursor / Claude Code /
+  // Windsurf / Copilot Agent / Raycast spawn this as a subprocess and
+  // talk JSON-RPC 2.0 over stdin+stdout. ALL human-facing logging
+  // (including the banner) MUST go to stderr or be skipped — anything
+  // on stdout that isn't a protocol frame breaks the client.
+  if (command === "mcp") {
+    const { runMcpServer } = await import("./mcp/index.js")
+    await runMcpServer()
+    return
+  }
+
   log(`\n${BOLD}@inariwatch/capture${RESET}\n`)
 
   if (command !== "init") {
     log(`${BOLD}Usage:${RESET}`)
-    log(`  npx @inariwatch/capture   ${DIM}# Auto-setup in your project${RESET}`)
+    log(`  npx @inariwatch/capture        ${DIM}# Auto-setup in your project${RESET}`)
+    log(`  npx @inariwatch/capture mcp    ${DIM}# Run the MCP server (stdio) for IDE integration${RESET}`)
     log(``)
     return
   }

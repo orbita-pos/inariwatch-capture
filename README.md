@@ -283,13 +283,46 @@ init({
 | `INARIWATCH_SUBSTRATE` | Set to `"true"` to enable I/O recording |
 | `INARIWATCH_REDACT` | Set to `"true"` to enable in-process PII redaction |
 
+## IDE integration via MCP (Cursor / Claude Code / Windsurf / Copilot Agent)
+
+Run your app with the dev log on:
+
+```bash
+INARIWATCH_DEV_LOG=1 npm run dev
+```
+
+Every captured error is appended to `.inariwatch/errors.jsonl` in the
+project root. Then point your editor's MCP client at the SDK's stdio
+server. For Cursor (`~/.cursor/mcp.json`) or Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "inariwatch": {
+      "command": "npx",
+      "args": ["@inariwatch/capture", "mcp"]
+    }
+  }
+}
+```
+
+The agent now has three tools:
+
+- `inari_recent_errors({ limit?, severity? })` — newest events first.
+- `inari_get_error({ fingerprint })` — full event by fingerprint (prefix
+  match works).
+- `inari_clear_log()` — truncate the JSONL after a fix lands.
+
+Zero deps, zero network — the MCP server reads the same JSONL file the
+SDK writes locally. Override the path with `INARIWATCH_DEV_LOG_PATH`.
+
 ## Exports
 
 | Import | Description |
 |--------|-------------|
 | `@inariwatch/capture` | SDK — `init`, `captureException`, `captureLog`, `addBreadcrumb`, `setUser`, `setTag`, `setRequestContext`, `flush` |
 | `@inariwatch/capture/auto` | Auto-init on import — config from env vars |
-| `@inariwatch/capture/browser` | Browser entry — error + unhandled rejection listeners |
+| `@inariwatch/capture/browser` | Browser auto-init (side-effect import). Reads config from `window.__INARIWATCH__` and `<meta name="inariwatch:*">` tags. Lean v2 client, fetch + XHR breadcrumbs, FullTrace session header. |
 | `@inariwatch/capture/shield` | Runtime security — source-to-sink attack detection |
 | `@inariwatch/capture/next` | Next.js plugin — `withInariWatch()` |
 | `@inariwatch/capture/vite` | Vite plugin — `inariwatchVite()` (covers Nuxt/Remix/SvelteKit/Astro/SolidStart/Qwik) |
