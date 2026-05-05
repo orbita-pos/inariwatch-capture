@@ -3,6 +3,36 @@
 All notable changes to the SDK. Older releases pre-date this file —
 see git history for `0.10.x` and earlier.
 
+## 0.11.2 — 2026-05-05
+
+### Added
+- **`npx @inariwatch/capture doctor`** — non-destructive self-diagnostic.
+  Runs in <1 second offline (use `--offline` to skip the DSN reachability
+  HEAD probe). Ten checks, each one of `ok` / `info` / `warn` / `fail`
+  with a one-line hint when something is off:
+  - Node version (>= 18)
+  - `package.json` present + `@inariwatch/capture` declared
+  - Framework auto-detected (Next / Nuxt / Vite / Remix / SvelteKit /
+    Astro / Express / Fastify / Hono / plain Node)
+  - Framework plugin wired in the right config file
+    (`withInariWatch` / `inariwatchVite` / `@inariwatch/capture/nuxt` /
+    `--import @inariwatch/capture/auto`)
+  - Next.js `instrumentation.ts` exports `onRequestError` (warn if the
+    file imports `capture/auto` but forgot the handler — the most common
+    half-finished onboarding state)
+  - `INARIWATCH_DSN` resolved (process.env > .env.local > .env)
+  - DSN parses as a valid URL
+  - DSN endpoint reachable (HEAD probe, 5s timeout — only the hostname,
+    never the secret-bearing URL, so no integration secrets leak)
+  - Dev-log JSONL state (event count + latest event age) when
+    `INARIWATCH_DEV_LOG=1` is on
+  - MCP server registered in Cursor (`~/.cursor/mcp.json`) or Claude
+    Code (`~/.config/claude/mcp.json`, `~/.claude/mcp.json`)
+
+  Exit code is `0` when no checks fail, `1` when any do. Warnings and
+  info notes never affect exit, so it's safe to wire into CI as
+  `npx @inariwatch/capture doctor --offline`.
+
 ## 0.11.1 — 2026-05-05
 
 ### Added

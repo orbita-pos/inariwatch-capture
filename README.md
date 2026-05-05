@@ -283,6 +283,23 @@ init({
 | `INARIWATCH_SUBSTRATE` | Set to `"true"` to enable I/O recording |
 | `INARIWATCH_REDACT` | Set to `"true"` to enable in-process PII redaction |
 
+## Diagnose your install
+
+```bash
+npx @inariwatch/capture doctor
+```
+
+Runs ten read-only checks against your project — Node version, framework
+detection, plugin wired, `instrumentation.ts` set up, `INARIWATCH_DSN`
+resolved, DSN endpoint reachable, dev-log state, MCP IDE config. Each
+result is `ok` / `info` / `warn` / `fail` with a one-line hint when
+something is off. Exits `1` on failures, `0` otherwise — safe to wire
+into CI:
+
+```bash
+npx @inariwatch/capture doctor --offline    # skip the network probe
+```
+
 ## IDE integration via MCP (Cursor / Claude Code / Windsurf / Copilot Agent)
 
 Run your app with the dev log on:
