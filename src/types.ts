@@ -9,6 +9,21 @@ export interface CaptureConfig {
   debug?: boolean
   /** Suppress all console output */
   silent?: boolean
+  /**
+   * Wire-format compression for outbound events.
+   *
+   * - `"br"` — compress payloads >=1 KB with brotli before sending. The
+   *   server (`@inariwatch/web` capture endpoint) decompresses
+   *   transparently. Saves 70-85% bandwidth on large events.
+   * - `false` (default) — send raw JSON. Choose this if your DSN
+   *   endpoint isn't an InariWatch dashboard or you're unsure whether
+   *   it understands `Content-Encoding: br`.
+   *
+   * Also settable via the `INARIWATCH_COMPRESSION` env var. The caller
+   * value wins when both are set. Browser + edge runtimes silently
+   * skip compression (no `node:zlib`).
+   */
+  compression?: "br" | false
   /** Transform or filter events before sending — return null to drop */
   beforeSend?: (event: ErrorEvent) => ErrorEvent | null
   /** Enable Substrate I/O recording — requires @inariwatch/substrate-agent installed. */

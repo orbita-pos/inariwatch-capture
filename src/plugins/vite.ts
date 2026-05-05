@@ -17,6 +17,7 @@
  */
 
 import { extractGitInfo } from "../git.js"
+import { computeDebugId, injectDebugIdComment, injectDebugIdIntoSourceMap } from "./debug-id.js"
 
 type ViteUserConfig = {
   define?: Record<string, unknown>
@@ -28,6 +29,13 @@ type ViteUserConfig = {
   [key: string]: unknown
 }
 
+type RenderedChunk = {
+  fileName: string
+  type: "chunk" | "asset"
+  code?: string
+  map?: { toString(): string } | null
+}
+
 type VitePlugin = {
   name: string
   enforce?: "pre" | "post"
@@ -35,10 +43,30 @@ type VitePlugin = {
     config: ViteUserConfig,
     env: { command: string; mode: string },
   ) => ViteUserConfig | null | undefined | void
+  /**
+   * Rollup `renderChunk` hook (Vite, Rollup, esbuild-via-Vite all honor
+   * this). Runs after the chunk is rendered, before write. We inject the
+   * TC39-spec debug-id magic comment + sourcemap field here.
+   */
+  renderChunk?: (
+    code: string,
+    chunk: RenderedChunk,
+  ) => { code: string; map?: string | null } | null | undefined
 }
 
-export function inariwatchVite(): VitePlugin {
-  return {
+export interface InariwatchViteOptions {
+  /**
+   * Emit TC39 ecma426 debug-id comments + sourcemap fields per chunk.
+   * Default: true. Disable if you have a custom symbolicator that breaks
+   * on the trailing magic comment.
+   */
+  injectDebugIds?: boolean
+}
+
+export function inariwatchVite(opts: InariwatchViteOptions = {}): VitePlugin {
+  const debugIdsEnabled = opts.injectDebugIds !== false
+
+  const plugin: VitePlugin = {
     name: "inariwatch-capture",
     enforce: "pre",
     config(userConfig) {
@@ -76,6 +104,29 @@ export function inariwatchVite(): VitePlugin {
       }
     },
   }
+
+  if (debugIdsEnabled) {
+    plugin.renderChunk = function (code, chunk) {
+      // Only transform JS chunks. Assets (images, css extracted via plugins,
+      // etc.) come through here too on some Rollup configurations — skip.
+      if (chunk.type !== "chunk") return null
+      const debugId = computeDebugId(code)
+      const newCode = injectDebugIdComment(code, debugId)
+      // Vite/Rollup will write the sourcemap separately; if it's already
+      // attached as an object on the chunk, mutate the JSON we'll return
+      // so the bundler emits the updated map. Otherwise return null and
+      // let the bundler handle the map (the magic comment alone gives
+      // tools a debug-id pointer).
+      if (chunk.map) {
+        const mapText = chunk.map.toString()
+        const newMap = injectDebugIdIntoSourceMap(mapText, debugId)
+        return { code: newCode, map: newMap }
+      }
+      return { code: newCode }
+    }
+  }
+
+  return plugin
 }
 
 export default inariwatchVite
