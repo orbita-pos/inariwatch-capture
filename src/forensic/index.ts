@@ -1,6 +1,5 @@
 import type { ForensicHook, ForensicOptions } from "./types.js"
 import * as fallback from "./fallback-inspector.js"
-import * as fork from "./fork-bridge.js"
 
 export type {
   ForensicValue,
@@ -10,7 +9,6 @@ export type {
   ForensicOptions,
 } from "./types.js"
 export { serializeValue } from "./serialize.js"
-export { isAvailable as isForkAvailable } from "./fork-bridge.js"
 export { decode as decodeMsgpack, decodeForensicPayload } from "./msgpack-decoder.js"
 export {
   installSessionFile,
@@ -25,19 +23,34 @@ export {
 } from "./integration.js"
 export type { ForensicIntegrationConfig } from "./integration.js"
 
+/**
+ * Backward-compat shim. The ForensicVM fork was cancelled in 2026-04;
+ * stock Node never had the binding, and no public release ever shipped
+ * one. Kept exported so existing callers compile, but always reports
+ * unavailable. Inspector fallback is now the only path.
+ */
+export function isForkAvailable(): boolean {
+  return false
+}
+
 let mode: "fork" | "inspector" | null = null
 
 /**
  * Register a hook fired on every uncaught exception with frame locals,
- * closures, and receiver `this`. The hook runs off the throw path —
- * synchronously on the fork, asynchronously on the inspector fallback.
+ * closures, and receiver `this`. The hook runs off the throw path
+ * asynchronously via `inspector.Session` attach-on-throw.
  *
  * Call once per process. A second call throws until `unregisterForensicHook`.
  *
- * Resolution order:
- *   1. ForensicVM fork when `process.versions.iw_forensic` is set and
- *      `forceFallback` is not true.
- *   2. Otherwise `inspector.Session` attach-on-throw.
+ * The `forceFallback` option is accepted for API compatibility but is a
+ * no-op in this runtime — the inspector fallback is the only available
+ * path. The Python port still honors it because PEP 669
+ * (`sys.monitoring`) and the `settrace` fallback are both real options
+ * there.
+ *
+ * Return type retains the `"fork"` literal for compatibility with
+ * existing exhaustive switches; in practice this runtime only ever
+ * returns `{ mode: "inspector" }`.
  *
  * See `docs/forensic-architecture.md` for the full picture and
  * `docs/forensic-locals-schema.md` for the locals shape this ships to
@@ -50,20 +63,14 @@ export async function registerForensicHook(
   if (mode !== null) {
     throw new Error("@inariwatch/node-forensic: hook already registered")
   }
-  const wantsFork = !options.forceFallback && fork.isAvailable()
-  if (wantsFork) {
-    await fork.install(hook, options)
-    mode = "fork"
-    return { mode }
-  }
+  void options.forceFallback
   await fallback.install(hook, options)
   mode = "inspector"
   return { mode }
 }
 
 export async function unregisterForensicHook(): Promise<void> {
-  if (mode === "fork") await fork.uninstall()
-  else if (mode === "inspector") await fallback.uninstall()
+  if (mode === "inspector") await fallback.uninstall()
   mode = null
 }
 

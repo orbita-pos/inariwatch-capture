@@ -43,4 +43,23 @@ export const SENSITIVE_KEYS = new Set<string>([
   "refresh_token",
   "access_token",
   "id_token",
+  // Common camelCase variants (object keys often arrive un-snake-cased
+  // from JS callers — the case-insensitive match below covers `apiKey`
+  // already, but explicit camelCase entries here document the intent).
+  "accesstoken",
+  "refreshtoken",
+  // Financial PII — these field names appear in checkout / payment flows
+  // and must never reach the wire. Card numbers also match the
+  // Luhn-validated CREDIT_CARD content regex, but adding the key names
+  // catches the case where the value has been mangled (spaces, dashes
+  // stripped) and the regex misses.
+  "credit_card",
+  "creditcard",
+  "card_number",
+  "cardnumber",
+  "cvv",
+  "cvc",
+  "ssn",
+  "social_security",
+  "social_security_number",
 ])

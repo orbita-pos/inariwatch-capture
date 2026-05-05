@@ -63,7 +63,7 @@ Constraints:
 export interface PeerAgentConfig {
   /** OpenAI API key — required. */
   apiKey: string
-  /** Model override. Default: gpt-5.4. */
+  /** Model override. Default: gpt-4o-mini. */
   model?: string
   /** OpenAI base URL override (Azure / proxy). */
   baseUrl?: string
