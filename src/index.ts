@@ -11,6 +11,9 @@ export { withInariWatch } from "./plugins/next.js"
 export { addBreadcrumb } from "./breadcrumbs.js"
 export { setUser, setTag, setRequestContext, runWithScope } from "./scope.js"
 export { initFullTrace, getSessionId, setSessionId, injectSessionHeader, __resetFullTraceForTesting } from "./fulltrace.js"
+// In-process PII / secret redaction (v0.3 S6). Opt-in via init({ redact: true }).
+export { redactPayload, resolveRedactConfig } from "./redact/index.js"
+export type { RedactConfig, Pattern as RedactPattern } from "./redact/index.js"
 
 export type {
   CaptureConfig, ErrorEvent, ParsedDSN, SubstrateConfig, SessionConfig, SessionEvent,

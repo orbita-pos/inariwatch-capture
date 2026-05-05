@@ -7,6 +7,7 @@ import { getBreadcrumbs, initBreadcrumbs } from "./breadcrumbs.js"
 import { getUser, getTags, getRequestContext } from "./scope.js"
 import { initFullTrace, getSessionId } from "./fulltrace.js"
 import { resolvePayloadVersion } from "./payload-version.js"
+import { redactPayload, resolveRedactConfig, type RedactConfig } from "./redact/index.js"
 
 let globalTransport: Transport | null = null
 let globalConfig: CaptureConfig | null = null
@@ -14,6 +15,7 @@ let lastReportedRelease: string | null = null
 let substrateFlush: ((dsn?: string) => Promise<unknown>) | null = null
 let sessionFlush: (() => import("./types.js").SessionEvent[]) | null = null
 let registeredIntegrations: Integration[] = []
+let resolvedRedactConfig: RedactConfig = { enabled: false }
 
 /**
  * Run all registered integrations' `onBeforeSend` hooks in registration order,
@@ -66,7 +68,10 @@ async function sendWithHooks(event: ErrorEvent): Promise<void> {
       // Transport's `send` types `ErrorEvent`; the v2 shape is structurally
       // wider but the transport only reads `fingerprint` for retry dedup
       // and JSON-stringifies everything else, so it round-trips safely.
-      globalTransport.send(wire as unknown as ErrorEvent)
+      const finalV2 = resolvedRedactConfig.enabled
+        ? redactPayload(wire as unknown as ErrorEvent, resolvedRedactConfig)
+        : (wire as unknown as ErrorEvent)
+      globalTransport.send(finalV2)
       return
     } catch (err) {
       if (globalConfig.debug) {
@@ -79,7 +84,13 @@ async function sendWithHooks(event: ErrorEvent): Promise<void> {
     }
   }
 
-  globalTransport.send(current)
+  // Last step before the wire: in-process PII / secret redaction (v1
+  // path). Runs after every integration hook and the user's beforeSend
+  // so it sees the fully-enriched payload. No-op when redact is unset.
+  const finalEvent = resolvedRedactConfig.enabled
+    ? redactPayload(current, resolvedRedactConfig)
+    : current
+  globalTransport.send(finalEvent)
 }
 
 /** Flush all pending events — call this before process exit or serverless return. */
@@ -92,6 +103,7 @@ export function init(config: CaptureConfig = {}): void {
   const dsn = config.dsn || env.INARIWATCH_DSN
   const environment = config.environment || env.INARIWATCH_ENVIRONMENT || env.NODE_ENV
   globalConfig = { ...config, dsn, environment }
+  resolvedRedactConfig = resolveRedactConfig(config.redact)
 
   if (!dsn) {
     globalTransport = createLocalTransport(globalConfig)

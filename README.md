@@ -131,6 +131,7 @@ Initialize the SDK. Call once at app startup. All options are optional — confi
 | `environment` | `string` | Environment tag (default: `INARIWATCH_ENVIRONMENT` or `NODE_ENV`) |
 | `release` | `string` | Release version — also triggers a deploy marker |
 | `substrate` | `boolean \| object` | Enable I/O recording (requires `@inariwatch/substrate-agent`) |
+| `redact` | `boolean \| RedactConfig` | Opt-in in-process PII / secret scrub. See [PII redaction](#pii-redaction-in-process-opt-in). |
 | `debug` | `boolean` | Log transport errors to console |
 | `silent` | `boolean` | Suppress all console output |
 | `beforeSend` | `(event) => event \| null` | Transform or drop events before sending |
@@ -209,6 +210,69 @@ INARIWATCH_SUBSTRATE=true
 
 When `captureException()` fires, the last 60 seconds of I/O are uploaded with the error.
 
+## PII redaction (in-process, opt-in)
+
+Scrub emails, phone numbers, credit cards, JWTs, and API keys from the outgoing payload **before it leaves your process** — InariWatch's cloud never sees them.
+
+```typescript
+init({ redact: true })
+```
+
+Or via env var (works with `import "@inariwatch/capture/auto"`):
+
+```env
+INARIWATCH_REDACT=true
+```
+
+Regex-based, deterministic, zero new deps. No ML model is bundled — patterns are auditable in `src/redact/patterns.ts`.
+
+**What's scrubbed by default:**
+
+| Pattern | Example match | Replacement |
+|---------|---------------|-------------|
+| Email | `user@example.com` | `[REDACTED_EMAIL]` |
+| Phone | `(415) 555-1234` / `+52 555 123 4567` | `[REDACTED_PHONE]` |
+| US SSN | `123-45-6789` | `[REDACTED_SSN]` |
+| Credit card | `4111 1111 1111 1111` (Luhn-validated) | `[REDACTED_CREDIT_CARD]` |
+| JWT | `eyJ…⁠.…⁠.…` | `[REDACTED_JWT]` |
+| OpenAI key | `sk-proj-…` | `[REDACTED_OPENAI_KEY]` |
+| Stripe key | `sk_live_…` / `pk_live_…` | `[REDACTED_STRIPE_KEY]` |
+| GitHub token | `ghp_…` / `gho_…` / `ghs_…` | `[REDACTED_GITHUB_TOKEN]` |
+| AWS access key | `AKIA…` | `[REDACTED_AWS_ACCESS_KEY]` |
+| Google API key | `AIza…` | `[REDACTED_GOOGLE_API_KEY]` |
+| Slack token | `xoxb-…` / `xoxp-…` | `[REDACTED_SLACK_TOKEN]` |
+| Sensitive object keys | `{ password, token, api_key, authorization, cookie, … }` | whole value → `[REDACTED_VALUE]` |
+
+**Off by default** (toggle on if your compliance posture requires it):
+
+| Option | Why off | Toggle |
+|--------|---------|--------|
+| IPv4 addresses | Most users want IPs visible for routing/abuse debugging | `redact: { redactIPs: true }` |
+| AWS secret-shape (40-char base64) | Collides with paths and binary blobs | `redact: { redactAwsSecrets: true }` |
+
+**Configuration:**
+
+```typescript
+init({
+  redact: {
+    // Skip redaction at these dot-paths even if the value matches.
+    allowlist: ["request.headers.user-agent", "metadata.publicId"],
+    // Append project-specific patterns.
+    customPatterns: [
+      { label: "EMPLOYEE_ID", regex: /EMP-\d{5,}/g },
+    ],
+    // Hash mode — append an FNV-1a fingerprint so you can correlate the
+    // same redacted value across events without exposing it:
+    //   "[REDACTED_EMAIL:a1b2c3d4]"
+    hashMode: true,
+  },
+})
+```
+
+**Performance:** ~0.5ms p95 on a 5KB payload (well under the 5ms hot-path budget). Redacted events are tagged with `_meta.redact_applied: true` so server-side enrichment can skip paths that would re-derive PII.
+
+**Disclaimer:** regex-based detection is high-precision but not exhaustive. For ML-grade entity detection, pair this with cloud-side redaction post-ingest. The trade-off this SDK makes is *zero new dependencies and full local control*.
+
 ## Environment variables
 
 | Variable | Description |
@@ -217,6 +281,7 @@ When `captureException()` fires, the last 60 seconds of I/O are uploaded with th
 | `INARIWATCH_ENVIRONMENT` | Environment tag (fallback: `NODE_ENV`) |
 | `INARIWATCH_RELEASE` | Release version |
 | `INARIWATCH_SUBSTRATE` | Set to `"true"` to enable I/O recording |
+| `INARIWATCH_REDACT` | Set to `"true"` to enable in-process PII redaction |
 
 ## Exports
 

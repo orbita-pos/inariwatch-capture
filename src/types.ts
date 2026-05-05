@@ -36,6 +36,19 @@ export interface CaptureConfig {
    *   init({ integrations: [replayIntegration()] })
    */
   integrations?: Integration[]
+  /**
+   * Opt-in in-process PII / secret redaction. When enabled, the SDK
+   * scrubs the outgoing payload (emails, phones, credit cards, JWTs,
+   * API keys, sensitive object keys) BEFORE the transport sends it.
+   *
+   *   init({ redact: true })
+   *   init({ redact: { allowlist: ["request.headers.user-agent"] } })
+   *
+   * Default: disabled (back-compat). The redactor is regex-based,
+   * deterministic, and zero-dep — no ML model is bundled. See
+   * `capture/src/redact/` for the pattern set + config shape.
+   */
+  redact?: boolean | Partial<import("./redact/index.js").RedactConfig>
 }
 
 /**
