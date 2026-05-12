@@ -1,6 +1,6 @@
 import type { CaptureConfig, ErrorEvent, Integration, SubstrateConfig, SessionConfig, FullTraceConfig } from "./types.js"
 import { computeErrorFingerprint } from "./fingerprint.js"
-import { parseDSN, createTransport, createLocalTransport, type Transport } from "./transport.js"
+import { parseDSN, parseToken, createTransport, createLocalTransport, type Transport } from "./transport.js"
 import { getGitContext } from "./git.js"
 import { getEnvironmentContext } from "./environment.js"
 import { getBreadcrumbs, initBreadcrumbs } from "./breadcrumbs.js"
@@ -101,17 +101,37 @@ export async function flush(): Promise<void> {
 export function init(config: CaptureConfig = {}): void {
   const env = typeof process !== "undefined" && process.env ? process.env : {} as Record<string, string | undefined>
   const dsn = config.dsn || env.INARIWATCH_DSN
+  // Inari Live V1 — Session 2: project token (`iwk_pub_v1_…`) is an
+  // alternative to DSN. The two coexist: a token+projectId pair builds the
+  // same wire shape parseDSN would have produced, just keyed on a
+  // bearer secret instead of an HMAC one. Token wins when both are set so
+  // a user mid-migration can leave the legacy DSN in place and just add
+  // INARIWATCH_TOKEN/INARIWATCH_PROJECT_ID to flip authentication.
+  const token = config.token || env.INARIWATCH_TOKEN
+  const projectId = config.projectId || env.INARIWATCH_PROJECT_ID
+  const host = config.host || env.INARIWATCH_HOST
   const environment = config.environment || env.INARIWATCH_ENVIRONMENT || env.NODE_ENV
-  globalConfig = { ...config, dsn, environment }
+  globalConfig = { ...config, dsn, token, projectId, host, environment }
   resolvedRedactConfig = resolveRedactConfig(config.redact)
 
-  if (!dsn) {
+  // Resolution order: explicit token (with projectId) → DSN → local. The
+  // token path falls through to DSN if `parseToken` returns null (e.g.
+  // missing/invalid projectId), preserving backwards-compat behaviour for
+  // a misconfigured user instead of silently dropping events.
+  let parsed = null as ReturnType<typeof parseDSN> | null
+  if (token && projectId) {
+    parsed = parseToken(token, projectId, host)
+  }
+  if (!parsed && dsn) {
+    parsed = parseDSN(dsn)
+  }
+
+  if (!parsed) {
     globalTransport = createLocalTransport(globalConfig)
     if (!config.silent) {
-      console.log("\x1b[2m[@inariwatch/capture] Local mode — errors print to terminal. Set INARIWATCH_DSN to send to cloud.\x1b[0m")
+      console.log("\x1b[2m[@inariwatch/capture] Local mode — errors print to terminal. Set INARIWATCH_DSN or INARIWATCH_TOKEN+INARIWATCH_PROJECT_ID to send to cloud.\x1b[0m")
     }
   } else {
-    const parsed = parseDSN(dsn)
     globalTransport = createTransport(globalConfig, parsed)
   }
 

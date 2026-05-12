@@ -3,20 +3,38 @@ import { isZeroRetentionEnabled, extractTombstone, persistTombstone } from "./to
 
 const MAX_RETRY_BUFFER = 30
 
+/**
+ * Project-token prefix introduced in Inari Live V1 — Session 2. Tokens
+ * minted by the web app or Inari Live look like `iwk_pub_v1_<…>`. When
+ * the parsed `secretKey` matches this prefix, the transport switches
+ * from HMAC body signing to `Authorization: Bearer` auth.
+ *
+ * Kept in sync with `web/lib/services/project-tokens.service.ts` —
+ * changing the prefix here without bumping the server is a wire break.
+ */
+export const PROJECT_TOKEN_PREFIX = "iwk_pub_v1_"
+
+export function isProjectToken(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith(PROJECT_TOKEN_PREFIX)
+}
+
 export function parseDSN(dsn: string): ParsedDSN {
   // Local mode: "http://localhost:9111/ingest"
   const parsedUrl = new URL(dsn)
   if (parsedUrl.hostname === "localhost" || parsedUrl.hostname === "127.0.0.1") {
-    return { endpoint: dsn, secretKey: "", isLocal: true }
+    return { endpoint: dsn, secretKey: "", isLocal: true, authMode: "local" }
   }
 
   // Cloud mode requires HTTPS
   if (parsedUrl.protocol !== "https:") {
     console.warn("[@inariwatch/capture] DSN must use HTTPS for non-local endpoints. Events will not be sent.")
-    return { endpoint: "", secretKey: "", isLocal: false }
+    return { endpoint: "", secretKey: "", isLocal: false, authMode: "hmac" }
   }
 
-  // Cloud mode: "https://secret@app.inariwatch.com/capture/integration-id"
+  // Cloud mode legacy: "https://secret@app.inariwatch.com/capture/integration-id"
+  // Cloud mode token:  "https://iwk_pub_v1_xxx@app.inariwatch.com/capture/<projectId>"
+  // Both DSN shapes converge here — only the prefix of `secretKey` decides
+  // how the transport authenticates the request.
   const url = new URL(dsn)
   const secretKey = url.username || url.password || ""
   url.username = ""
@@ -28,10 +46,51 @@ export function parseDSN(dsn: string): ParsedDSN {
     url.pathname = `/api/webhooks${path}`
   }
 
-  return { endpoint: url.toString(), secretKey, isLocal: false }
+  const authMode: "hmac" | "token" = isProjectToken(secretKey) ? "token" : "hmac"
+  return { endpoint: url.toString(), secretKey, isLocal: false, authMode }
 }
 
-async function signPayload(body: string | Uint8Array, secret: string): Promise<string> {
+/**
+ * Resolve a project-token plaintext + projectId into a wire-ready ParsedDSN.
+ * Used when the user passes `init({ token, projectId })` instead of a DSN
+ * URL — the SDK synthesises the endpoint from `host` / `INARIWATCH_HOST` /
+ * the default `https://app.inariwatch.com`. The server treats the token's
+ * project_id as authoritative AND verifies the URL path UUID matches as
+ * defense-in-depth, so the projectId argument is required.
+ *
+ * Returns `null` when the token doesn't look like a project token. Caller
+ * should fall back to DSN mode (or local mode) in that case. The friction-
+ * free path is to use the DSN URL the web mint endpoint already returns
+ * (`https://iwk_pub_v1_…@host/capture/<projectId>`) — that has both pieces
+ * baked in and just goes through `parseDSN`.
+ */
+export function parseToken(
+  token: string,
+  projectId: string,
+  hostOverride?: string,
+): ParsedDSN | null {
+  if (!isProjectToken(token)) return null
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) {
+    console.warn("[@inariwatch/capture] init({ token }) requires a valid `projectId` (UUID). Events will not be sent.")
+    return null
+  }
+  const env = (typeof process !== "undefined" && process.env) || {}
+  const rawHost =
+    hostOverride ??
+    env.INARIWATCH_HOST ??
+    env.INARIWATCH_DSN_HOST ??
+    "https://app.inariwatch.com"
+  const host = rawHost.replace(/\/$/, "")
+
+  return {
+    endpoint: `${host}/api/webhooks/capture/${projectId}`,
+    secretKey: token,
+    isLocal: false,
+    authMode: "token",
+  }
+}
+
+async function signPayload(body: string, secret: string): Promise<string> {
   // Node path first (faster + no async crypto.subtle). Skip on browsers —
   // `node:crypto` is not resolvable there.
   if (typeof window === "undefined") {
@@ -41,13 +100,7 @@ async function signPayload(body: string | Uint8Array, secret: string): Promise<s
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const nodeCrypto: any = await import(/* webpackIgnore: true */ pkg)
       if (nodeCrypto.createHmac) {
-        const hmac = nodeCrypto.createHmac("sha256", secret)
-        if (typeof body === "string") {
-          hmac.update(body, "utf8")
-        } else {
-          hmac.update(body)
-        }
-        return `sha256=${hmac.digest("hex")}`
+        return `sha256=${nodeCrypto.createHmac("sha256", secret).update(body, "utf8").digest("hex")}`
       }
     } catch {
       // Fallback: Web Crypto API
@@ -57,61 +110,11 @@ async function signPayload(body: string | Uint8Array, secret: string): Promise<s
   const encoder = new TextEncoder()
   const keyData = encoder.encode(secret)
   const key = await crypto.subtle.importKey("raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
-  const data = typeof body === "string" ? encoder.encode(body) : body
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sig = await crypto.subtle.sign("HMAC", key, data as any)
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(body))
   const hex = Array.from(new Uint8Array(sig))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
   return `sha256=${hex}`
-}
-
-// Brotli compression for outbound POST bodies. Opt-in via env var
-// (`INARIWATCH_COMPRESSION=br`) or `init({ compression: "br" })`. Default
-// off so a fresh install is byte-identical with 0.11.x — flipping the
-// default depends on every user's ingest endpoint understanding
-// `Content-Encoding: br`. Once the InariWatch server-side rollout for
-// the public dashboard ships, the default may flip; until then we
-// preserve the conservative posture from `feedback_no_breaking_changes`.
-//
-// Compression skipped when:
-//   - Caller didn't opt in.
-//   - `node:zlib` isn't reachable (browsers, edge runtimes).
-//   - Payload is below the 1 KB threshold (overhead exceeds savings).
-//   - `brotliCompressSync` is missing (Node <11; we don't formally
-//     support that, but we degrade silently rather than crashing).
-async function maybeCompress(
-  bodyText: string,
-  algo: "br" | undefined,
-): Promise<{ body: Uint8Array | string; encoding?: "br" }> {
-  if (algo !== "br") return { body: bodyText }
-  if (typeof window !== "undefined") return { body: bodyText }
-  if (bodyText.length < 1024) return { body: bodyText }
-  try {
-    const pkg = "node:zlib"
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const zlib: any = await import(/* webpackIgnore: true */ pkg)
-    if (typeof zlib.brotliCompressSync !== "function") return { body: bodyText }
-    const compressed: Uint8Array = zlib.brotliCompressSync(Buffer.from(bodyText, "utf8"))
-    // Only commit to the compressed wire if it actually saved at least
-    // 10% of the bytes. Tiny gains aren't worth the decompression cost
-    // on the server.
-    if (compressed.byteLength >= bodyText.length * 0.9) return { body: bodyText }
-    return { body: compressed, encoding: "br" }
-  } catch {
-    return { body: bodyText }
-  }
-}
-
-function resolveCompression(config: CaptureConfig): "br" | undefined {
-  // Caller-set takes precedence over env.
-  if (config.compression === "br" || config.compression === false) {
-    return config.compression === "br" ? "br" : undefined
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const proc = (globalThis as any).process as any
-  const env = proc?.env?.INARIWATCH_COMPRESSION
-  return env === "br" ? "br" : undefined
 }
 
 export interface Transport {
@@ -199,23 +202,23 @@ export function createTransport(config: CaptureConfig, parsed: ParsedDSN): Trans
     if (config.debug) console.warn(`[@inariwatch/capture] ${msg}`)
   }
 
-  const compressionAlgo = resolveCompression(config)
-
   async function sendOne(event: ErrorEvent): Promise<boolean> {
-    const json = JSON.stringify(event)
+    const body = JSON.stringify(event)
     const headers: Record<string, string> = { "Content-Type": "application/json" }
 
-    // Apply compression BEFORE HMAC so the server validates the wire bytes
-    // it actually received. Server reject path stays cheap: HMAC fails
-    // before we burn CPU on decompression.
-    const compressed = await maybeCompress(json, compressionAlgo)
-    const wireBody = compressed.body
-    if (compressed.encoding) {
-      headers["Content-Encoding"] = compressed.encoding
-    }
-
+    // Auth dispatch (Inari Live V1 — Session 2):
+    //   - "token": stateless bearer; no body HMAC. Server SHA-256s the value
+    //              and looks up project_tokens.token_hash.
+    //   - "hmac":  legacy DSN; HMAC-SHA256 over the body keyed on the DSN
+    //              secret. Header name kept as `x-capture-signature` for
+    //              full backwards compat with every shipped SDK version.
+    //   - "local": local mode, no auth.
     if (!parsed.isLocal && parsed.secretKey) {
-      headers["x-capture-signature"] = await signPayload(wireBody, parsed.secretKey)
+      if (parsed.authMode === "token") {
+        headers["Authorization"] = `Bearer ${parsed.secretKey}`
+      } else {
+        headers["x-capture-signature"] = await signPayload(body, parsed.secretKey)
+      }
     }
 
     // Zero-retention mode (Track E pieza 11). The flag is read once at
@@ -230,12 +233,7 @@ export function createTransport(config: CaptureConfig, parsed: ParsedDSN): Trans
     }
 
     try {
-      // Cast required because Node's `Uint8Array<ArrayBufferLike>` (the
-      // shape `Buffer` returns under recent @types/node) doesn't unify
-      // with the lib.dom.d.ts `BodyInit` strict `Uint8Array<ArrayBuffer>`.
-      // Runtime accepts both — only the type system is being precious.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await fetch(parsed.endpoint, { method: "POST", headers, body: wireBody as any })
+      const res = await fetch(parsed.endpoint, { method: "POST", headers, body })
       if (res.ok) {
         if (zeroRetention) {
           // Best-effort: parse + persist the tombstone. Never blocks the

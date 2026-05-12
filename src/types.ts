@@ -1,6 +1,24 @@
 export interface CaptureConfig {
   /** DSN — reads from INARIWATCH_DSN env var if not provided. Omit for local mode. */
   dsn?: string
+  /**
+   * Project token (Inari Live V1 — Session 2). Reads from `INARIWATCH_TOKEN`
+   * env var when not set. Mutually inclusive with DSN: if both are present
+   * the explicit `token` wins. The transport recognises the format
+   * `iwk_pub_v1_…` (whether passed here or extracted from a DSN URL) and
+   * sends it as `Authorization: Bearer …` instead of HMAC-signing the body.
+   *
+   * The endpoint host is taken from `INARIWATCH_HOST` (default
+   * `https://app.inariwatch.com`) and the project id is resolved server-side
+   * from the token, so a DSN URL is not required for token-mode setups.
+   */
+  token?: string
+  /**
+   * Override the API host for token-mode installs. Mostly useful for the
+   * desktop wizard pointing at a self-hosted instance. Falls back to
+   * `INARIWATCH_HOST`, then `https://app.inariwatch.com`.
+   */
+  host?: string
   /** Environment tag (e.g. "production", "preview", "development") */
   environment?: string
   /** Release tag (e.g. "v1.2.3") */
@@ -9,21 +27,6 @@ export interface CaptureConfig {
   debug?: boolean
   /** Suppress all console output */
   silent?: boolean
-  /**
-   * Wire-format compression for outbound events.
-   *
-   * - `"br"` — compress payloads >=1 KB with brotli before sending. The
-   *   server (`@inariwatch/web` capture endpoint) decompresses
-   *   transparently. Saves 70-85% bandwidth on large events.
-   * - `false` (default) — send raw JSON. Choose this if your DSN
-   *   endpoint isn't an InariWatch dashboard or you're unsure whether
-   *   it understands `Content-Encoding: br`.
-   *
-   * Also settable via the `INARIWATCH_COMPRESSION` env var. The caller
-   * value wins when both are set. Browser + edge runtimes silently
-   * skip compression (no `node:zlib`).
-   */
-  compression?: "br" | false
   /** Transform or filter events before sending — return null to drop */
   beforeSend?: (event: ErrorEvent) => ErrorEvent | null
   /** Enable Substrate I/O recording — requires @inariwatch/substrate-agent installed. */
@@ -51,6 +54,16 @@ export interface CaptureConfig {
    *   init({ integrations: [replayIntegration()] })
    */
   integrations?: Integration[]
+  /**
+   * Capture Awake — proactive browser monitoring (Web Vitals, LoAF, broken resources,
+   * rage clicks, memory leak heuristic, image optimization, storage quota, hydration
+   * mismatches, DOM size). Installed automatically by `@inariwatch/capture/browser`.
+   *
+   *   `true` / omitted  — all detectors with smart defaults
+   *   `false`           — opt out entirely
+   *   `AwakeConfig`     — fine-grained control (disable individual detectors, adjust thresholds)
+   */
+  awake?: boolean | AwakeConfig
   /**
    * Opt-in in-process PII / secret redaction. When enabled, the SDK
    * scrubs the outgoing payload (emails, phones, credit cards, JWTs,
@@ -366,8 +379,79 @@ export interface ShieldConfig {
   minInputLength?: number
 }
 
+/**
+ * Capture Awake — proactive browser performance and UX monitoring.
+ * Installed automatically by `@inariwatch/capture/browser`. Opt out via `awake: false`.
+ *
+ * Detectors: web-vitals, loaf, broken-resources, spa-routing, resource-audit,
+ * rage-clicks, memory-leak, image-optimizer, storage-quota, hydration, dom-size.
+ */
+export interface AwakeConfig {
+  /**
+   * Minimum rating to report for performance metrics.
+   * Default: "needs-improvement" — skips metrics rated "good" to reduce noise.
+   * Set "good" to receive all measurements.
+   */
+  minRating?: "good" | "needs-improvement" | "poor"
+  /** Disable specific detectors by name. */
+  disable?: Array<
+    | "web-vitals"
+    | "loaf"
+    | "broken-resources"
+    | "spa-routing"
+    | "resource-audit"
+    | "rage-clicks"
+    | "memory-leak"
+    | "image-optimizer"
+    | "storage-quota"
+    | "hydration"
+    | "dom-size"
+  >
+  /** Individual image slow-load threshold in ms (default: 1000). */
+  slowImageMs?: number
+  /** Fetch / XHR slow-response threshold in ms (default: 1000). */
+  slowFetchMs?: number
+  /** Oversized image transfer threshold in bytes (default: 500_000 = 500 KB). */
+  oversizedImageBytes?: number
+  /** Rage click: min clicks within the time window to trigger (default: 3). */
+  rageClickCount?: number
+  /** Rage click: detection window in ms (default: 1000). */
+  rageClickMs?: number
+  /** Rage click: proximity radius in px — clicks within this distance count (default: 20). */
+  rageClickRadiusPx?: number
+  /** Dead click: observation window in ms after clicking an interactive element (default: 3000). */
+  deadClickMs?: number
+  /** SPA route slow threshold in ms (default: 1000). */
+  slowRouteMs?: number
+  /** DOM node count warning threshold (default: 800, Lighthouse recommendation). */
+  domSizeWarn?: number
+  /** DOM node count critical threshold (default: 1400, Lighthouse recommendation). */
+  domSizeCritical?: number
+  /**
+   * Redact or transform pathnames in performance events.
+   * `true`  — strip pathname entirely (reports "[redacted]").
+   * `false` — include raw pathname (default).
+   * `fn`    — custom redactor, e.g. `p => p.replace(/\/[a-f0-9-]{36}/g, "/:id")`.
+   */
+  redactPathname?: boolean | ((pathname: string) => string)
+}
+
 export interface ParsedDSN {
   endpoint: string
   secretKey: string
   isLocal: boolean
+  /**
+   * Auth mode for the transport (Inari Live V1 — Session 2).
+   *
+   *   "hmac"  — legacy DSN (default). Body is signed with HMAC-SHA256 keyed
+   *             on `secretKey`, sent in `x-capture-signature: sha256=<hex>`.
+   *   "token" — project-token bearer. `secretKey` is the `iwk_pub_v1_…`
+   *             plaintext, sent in `Authorization: Bearer …`. No body HMAC.
+   *   "local" — local terminal mode (loopback host, no auth).
+   *
+   * `parseDSN` infers this from the prefix of `secretKey`; `parseToken`
+   * always returns `"token"`. Existing `parseDSN` callers keep working
+   * because the field is set unconditionally and they ignore unknown keys.
+   */
+  authMode: "hmac" | "token" | "local"
 }
