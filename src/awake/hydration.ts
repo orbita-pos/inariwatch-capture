@@ -19,7 +19,16 @@ const HYDRATION_PATTERNS: Array<{ re: RegExp; framework: string }> = [
   { re: /\[astro\] hydration/i, framework: "astro" },
 ]
 
-let originalConsoleError: typeof console.error | null = null
+// Marker used to detect when console.error is already wrapped by this
+// detector (or a hot-reloaded copy of it). Prevents double-wrap chains
+// and avoids competing with other libs that do the same.
+const WRAP_MARKER = "__inariwatchAwakeHydrationWrap" as const
+
+interface MarkedConsoleError {
+  (this: typeof console, ...args: unknown[]): void
+  [WRAP_MARKER]?: true
+}
+
 let installed = false
 
 function detectHydrationError(args: unknown[]): void {
@@ -46,11 +55,35 @@ function detectHydrationError(args: unknown[]): void {
 export function installHydrationDetector(): void {
   if (typeof window === "undefined") return
   if (installed) return
-  installed = true
 
-  originalConsoleError = console.error
-  console.error = function (...args: unknown[]) {
-    detectHydrationError(args)
-    originalConsoleError!(...args)
+  const current = console.error as MarkedConsoleError
+  if (current[WRAP_MARKER]) {
+    // We're already in the chain (e.g., HMR reload after this module
+    // re-evaluated). Don't add another layer.
+    installed = true
+    return
   }
+
+  // ── Safe wrap pattern ────────────────────────────────────────────────
+  // 1. Capture the CURRENT console.error (which may itself be a wrapper
+  //    installed by Sentry, Datadog, or the React dev runtime). Forward
+  //    to it via .apply so its `this` binding survives. The previous
+  //    implementation called `originalConsoleError!(...args)` which
+  //    broke `this` and lost the call chain if the wrapped fn relied on
+  //    its console-bound receiver.
+  // 2. Tag the new function with WRAP_MARKER so future installs detect
+  //    us and skip — no double-wrap chain.
+  // 3. Detect first, forward unconditionally. We never swallow the log
+  //    so dev-time React warnings still surface in the user's devtools.
+  const wrapped: MarkedConsoleError = function (this: typeof console, ...args: unknown[]): void {
+    try {
+      detectHydrationError(args)
+    } catch {
+      // Detector must never break console.error itself.
+    }
+    return current.apply(this, args)
+  }
+  wrapped[WRAP_MARKER] = true
+  console.error = wrapped
+  installed = true
 }

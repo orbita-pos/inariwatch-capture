@@ -14,6 +14,18 @@ interface ClickRecord {
   ts: number
 }
 
+/**
+ * Pending dead-click candidate. A click on an interactive element starts
+ * one; the persistent MutationObserver below clears the `mutated=false`
+ * flag if any DOM change lands during the dead-window. After deadMs we
+ * decide based on the flag.
+ */
+interface PendingDeadCheck {
+  el: Element
+  ts: number
+  mutated: boolean
+}
+
 function isInteractive(el: Element): boolean {
   const tag = el.tagName.toLowerCase()
   if (["a", "button", "input", "select", "textarea", "label"].includes(tag)) return true
@@ -41,8 +53,40 @@ export function installRageClicks(config: AwakeConfig): void {
   const pathname = getPathname(config)
 
   const clicks: ClickRecord[] = []
-  const rageFired = new WeakSet<Element>()
   let lastRageTs = 0
+
+  // ── ONE persistent MutationObserver shared across all dead-click checks
+  // ──────────────────────────────────────────────────────────────────────
+  // The previous implementation installed a fresh observer per click with
+  // `subtree:true` over the whole body. Modern SPAs mutate the body
+  // continuously (animations, Intercom widgets, etc.) so `mutated` flipped
+  // to `true` near 100% of the time and dead-clicks were never reported.
+  //
+  // Instead we keep a single observer running and tick a sticky
+  // `mutationTs` on every change. A click is "dead" iff no mutation
+  // happened in the deadMs window AFTER the click.
+  const pending: PendingDeadCheck[] = []
+  let lastMutationTs = 0
+
+  const observer = new MutationObserver(() => {
+    lastMutationTs = Date.now()
+    // Mark any pending dead-click checks whose window has been touched
+    // by this mutation batch.
+    for (const p of pending) {
+      if (lastMutationTs > p.ts) p.mutated = true
+    }
+  })
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "style", "hidden", "aria-hidden", "disabled"],
+  })
+
+  // Optional teardown for tests / unmount scenarios. Idempotent.
+  const teardown = (): void => observer.disconnect()
+  ;(window as unknown as { __inariwatchAwakeTeardownRageClicks?: () => void })
+    .__inariwatchAwakeTeardownRageClicks = teardown
 
   document.addEventListener(
     "click",
@@ -78,25 +122,18 @@ export function installRageClicks(config: AwakeConfig): void {
         }
       }
 
-      // ── Dead click: interactive element, no DOM response in window ───────
-      if (isInteractive(el) && !rageFired.has(el)) {
-        const snapshot = document.body.children.length
-        let mutated = false
-
-        const obs = new MutationObserver(() => {
-          mutated = true
-          obs.disconnect()
-        })
-        obs.observe(document.body, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          attributeFilter: ["class", "style", "hidden", "aria-hidden"],
-        })
+      // ── Dead click: interactive element, no DOM mutation in window ──────
+      // We seed `mutated` from `lastMutationTs > ts` (already-fired mutations
+      // immediately after the click frame count) and let the shared observer
+      // flip it later.
+      if (isInteractive(el)) {
+        const entry: PendingDeadCheck = { el, ts, mutated: lastMutationTs >= ts }
+        pending.push(entry)
 
         setTimeout(() => {
-          obs.disconnect()
-          if (!mutated && document.body.children.length === snapshot) {
+          const idx = pending.indexOf(entry)
+          if (idx >= 0) pending.splice(idx, 1)
+          if (!entry.mutated) {
             captureLog(
               `dead_click: ${elSelector(el)}`,
               "warn",
@@ -113,4 +150,9 @@ export function installRageClicks(config: AwakeConfig): void {
     },
     { passive: true },
   )
+
+  // Clean up observer on page hide / BFCache freeze. Capture's other
+  // detectors share this same cleanup path (see installAwake's pagehide
+  // listener once it's wired in).
+  window.addEventListener("pagehide", teardown, { once: true })
 }

@@ -13,6 +13,19 @@ const DEFAULT_SLOW_FETCH_MS = 1000
 const POOR_FETCH_MS = 3000
 const DEFAULT_OVERSIZED_BYTES = 500_000
 
+// Hard flush cadence for third-party impact aggregation. The previous
+// implementation used a 3s debounce that reset on every resource — a
+// chat app that loads assets every <3s never flushed its totals. A
+// fixed 10s interval guarantees periodic flushes regardless of traffic
+// pattern, plus an immediate flush on page hide / visibilitychange so
+// totals reach the cloud before the session ends.
+const THIRD_PARTY_FLUSH_INTERVAL_MS = 10_000
+// Per-tab cap on slow_image / slow_fetch / oversized_image / render_blocking
+// events. Without this cap, a render thrash producing 50+ entries each
+// fires 50+ network sends. We keep the cap generous enough that real
+// regressions still reach the cloud.
+const RESOURCE_EVENT_CAP_PER_KIND = 25
+
 // Known third-party origins and their human-readable labels
 const THIRD_PARTY_LABELS: Record<string, string> = {
   "www.google-analytics.com": "Google Analytics",
@@ -43,7 +56,18 @@ export function installResourceAudit(config: AwakeConfig): void {
 
   // Track third-party totals across resources (report once per origin after load)
   const thirdPartyTotals = new Map<string, { durationMs: number; scriptMs: number; count: number }>()
-  let thirdPartyFlushTimer: ReturnType<typeof setTimeout> | null = null
+  // Per-kind event counters for flood protection.
+  const emittedCounts: Record<string, number> = {
+    slow_image: 0,
+    slow_fetch: 0,
+    oversized_image: 0,
+    render_blocking: 0,
+  }
+  function shouldEmit(kind: keyof typeof emittedCounts): boolean {
+    if (emittedCounts[kind] >= RESOURCE_EVENT_CAP_PER_KIND) return false
+    emittedCounts[kind]++
+    return true
+  }
 
   function flushThirdParty(): void {
     for (const [hostname, data] of thirdPartyTotals) {
@@ -62,6 +86,10 @@ export function installResourceAudit(config: AwakeConfig): void {
         },
       )
     }
+    // Reset so the next interval reports DELTAS rather than ever-growing
+    // monotonic totals. This matches what "impact in the last 10s" means
+    // for an ops dashboard.
+    thirdPartyTotals.clear()
   }
 
   if (!PerformanceObserver.supportedEntryTypes.includes("resource")) return
@@ -72,7 +100,7 @@ export function installResourceAudit(config: AwakeConfig): void {
         const entry = raw as ExtendedResourceTiming
 
         // ── Slow images ────────────────────────────────────────────────────
-        if (entry.initiatorType === "img" && entry.duration >= slowImageMs) {
+        if (entry.initiatorType === "img" && entry.duration >= slowImageMs && shouldEmit("slow_image")) {
           const rating = ratingForMs(entry.duration, slowImageMs, POOR_IMAGE_MS)
           captureLog(
             `slow_image: ${Math.round(entry.duration)}ms ${entry.name}`,
@@ -89,7 +117,7 @@ export function installResourceAudit(config: AwakeConfig): void {
         }
 
         // ── Oversized images (large transfer) ─────────────────────────────
-        if (entry.initiatorType === "img" && entry.transferSize > oversizedBytes) {
+        if (entry.initiatorType === "img" && entry.transferSize > oversizedBytes && shouldEmit("oversized_image")) {
           captureLog(
             `oversized_image: ${Math.round(entry.transferSize / 1024)}KB ${entry.name}`,
             "warn",
@@ -106,7 +134,8 @@ export function installResourceAudit(config: AwakeConfig): void {
         // ── Render-blocking resources (Chrome 107+) ───────────────────────
         if (
           entry.renderBlockingStatus === "blocking" &&
-          entry.duration > 100
+          entry.duration > 100 &&
+          shouldEmit("render_blocking")
         ) {
           captureLog(
             `render_blocking: ${Math.round(entry.duration)}ms ${entry.name}`,
@@ -124,7 +153,8 @@ export function installResourceAudit(config: AwakeConfig): void {
         // ── Slow fetch / XHR ──────────────────────────────────────────────
         if (
           (entry.initiatorType === "fetch" || entry.initiatorType === "xmlhttprequest") &&
-          entry.duration >= slowFetchMs
+          entry.duration >= slowFetchMs &&
+          shouldEmit("slow_fetch")
         ) {
           const rating = ratingForMs(entry.duration, slowFetchMs, POOR_FETCH_MS)
           captureLog(
@@ -149,10 +179,6 @@ export function installResourceAudit(config: AwakeConfig): void {
             existing.count += 1
             if (entry.initiatorType === "script") existing.scriptMs += entry.duration
             thirdPartyTotals.set(entryHost, existing)
-
-            // Debounce flush: report third-party totals 3s after last resource
-            if (thirdPartyFlushTimer) clearTimeout(thirdPartyFlushTimer)
-            thirdPartyFlushTimer = setTimeout(flushThirdParty, 3000)
           }
         } catch {
           // Opaque cross-origin URL or relative URL — skip
@@ -161,5 +187,21 @@ export function installResourceAudit(config: AwakeConfig): void {
     }).observe({ type: "resource", buffered: true })
   } catch {
     // resource observer not available
+    return
   }
+
+  // ── Hard-interval flush + lifecycle hooks ───────────────────────────────
+  const flushTimer = setInterval(flushThirdParty, THIRD_PARTY_FLUSH_INTERVAL_MS)
+  const flushOnHidden = (): void => {
+    if (document.visibilityState === "hidden") flushThirdParty()
+  }
+  document.addEventListener("visibilitychange", flushOnHidden)
+  window.addEventListener("pagehide", flushThirdParty, { once: true })
+
+  // Expose teardown for tests / unmount. Idempotent.
+  ;(window as unknown as { __inariwatchAwakeTeardownResourceAudit?: () => void })
+    .__inariwatchAwakeTeardownResourceAudit = () => {
+      clearInterval(flushTimer)
+      document.removeEventListener("visibilitychange", flushOnHidden)
+    }
 }

@@ -21,14 +21,50 @@ interface Sample {
 
 const MAX_SAMPLES = 12
 const LEAK_WINDOW = 10
-const HEAP_GROWTH_TOLERANCE = 0.9 // allow 10% shrinkage between samples
+// 2% per-step tolerance — Chrome's performance.memory is quantized to
+// MB and lags GC, so a tiny dip between samples is normal and shouldn't
+// reset the "is growing?" flag. 10% (the previous setting) was loose
+// enough that a heap going 100→90MB still reported as leaking.
+const HEAP_GROWTH_TOLERANCE = 0.98
+// Require an end-to-end growth of at least 5% AND 5MB across the window
+// before reporting. Without this floor, normal startup growth (lazy
+// chunks, image decoders) trips the detector on every long session.
+const HEAP_END_GROWTH_PCT = 0.05
+const HEAP_END_GROWTH_MIN_BYTES = 5 * 1024 * 1024
+// DOM nodes don't have the GC quantization issue — tighten to 5% step
+// tolerance and require at least 50 net new nodes by the end.
+const DOM_GROWTH_TOLERANCE = 0.95
+const DOM_END_GROWTH_MIN_NODES = 50
 
-function isMonotonicallyGrowing(values: number[]): boolean {
+/**
+ * Returns true iff each sample is at most `tolerance` smaller than the
+ * previous one (i.e., the series is approximately non-decreasing).
+ * Tolerance of 0.98 means each step can dip up to 2% before the chain
+ * is considered broken.
+ */
+function isApproximatelyNonDecreasing(values: number[], tolerance: number): boolean {
   if (values.length < LEAK_WINDOW) return false
   for (let i = 1; i < values.length; i++) {
-    if (values[i] < values[i - 1] * HEAP_GROWTH_TOLERANCE) return false
+    if (values[i] < values[i - 1] * tolerance) return false
   }
   return true
+}
+
+/**
+ * End-to-end growth check. Together with the non-decreasing chain above
+ * this rejects "growing by GC quantization noise" and only fires when
+ * the trend has real magnitude.
+ */
+function hasMeaningfulEndGrowth(
+  values: number[],
+  minPct: number,
+  minAbs: number,
+): boolean {
+  const first = values[0] ?? 0
+  const last = values[values.length - 1] ?? 0
+  if (first <= 0) return false
+  const delta = last - first
+  return delta >= minAbs && delta / first >= minPct
 }
 
 export function installMemoryLeak(_config: AwakeConfig): void {
@@ -56,8 +92,13 @@ export function installMemoryLeak(_config: AwakeConfig): void {
       const heapValues = samples.map(s => s.heapBytes)
       const domValues = samples.map(s => s.domNodes)
 
-      const heapLeaking = hasMemory && isMonotonicallyGrowing(heapValues)
-      const domLeaking = isMonotonicallyGrowing(domValues)
+      const heapLeaking =
+        hasMemory &&
+        isApproximatelyNonDecreasing(heapValues, HEAP_GROWTH_TOLERANCE) &&
+        hasMeaningfulEndGrowth(heapValues, HEAP_END_GROWTH_PCT, HEAP_END_GROWTH_MIN_BYTES)
+      const domLeaking =
+        isApproximatelyNonDecreasing(domValues, DOM_GROWTH_TOLERANCE) &&
+        ((domValues[domValues.length - 1] ?? 0) - (domValues[0] ?? 0)) >= DOM_END_GROWTH_MIN_NODES
 
       if (heapLeaking || domLeaking) {
         leakReported = true

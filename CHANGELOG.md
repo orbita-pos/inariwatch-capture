@@ -3,6 +3,91 @@
 All notable changes to the SDK. Older releases pre-date this file —
 see git history for `0.10.x` and earlier.
 
+## 0.13.1 — 2026-05-13
+
+> Patch on top of 0.13.0. Five Awake detectors were shipped in the
+> previous release with a handful of real-world bugs that a code audit
+> caught (and runtime testing on a chromium headless browser confirmed).
+> All five are now hardened. No public API change — internal-only.
+
+### Fixed
+- **`awake/rage-clicks`** — dead-click detection installed a fresh
+  `MutationObserver` with `subtree: true` per click. In SPAs that
+  mutate `<body>` continuously (Intercom, animations, framework
+  re-renders) the `mutated=true` flag flipped near-100% of the time,
+  so legitimate dead clicks were never reported. Replaced with one
+  persistent shared observer + a pending-checks array; clicks are now
+  flagged mutated only when DOM changes land within their `deadMs`
+  window. Pagehide teardown added.
+- **`awake/memory-leak`** — heap step tolerance tightened from 10% to
+  2% per sample. With the 10% setting, a heap going `100 MB → 90 MB`
+  (a normal GC drop) still counted as "monotonic growth" and false-
+  positived. Added end-to-end growth floors (≥5% AND ≥5 MB for heap;
+  ≥50 net nodes for DOM) so startup lazy-loads no longer trip the
+  detector.
+- **`awake/resource-audit`** — the 3-second debounce for the
+  `third_party_impact` flush could never fire on a chat-style app
+  whose `fetch` rate is faster than 3 s. Replaced with a fixed 10-second
+  `setInterval` + immediate flush on `visibilitychange` / `pagehide`.
+  Per-kind event cap of 25/tab added for `slow_image`, `slow_fetch`,
+  `oversized_image`, `render_blocking` so a render thrash doesn't
+  flood the cloud.
+- **`awake/spa-routing`** — `pushState` and `replaceState` wrap now
+  captures the CURRENT implementation at install time (which may itself
+  be wrapped by React Router / Next / MUI / Sentry) and forwards
+  through it, instead of overwriting it. The previous code clobbered
+  whichever router wrapped last. Added a non-enumerable
+  `INSTALLED_MARKER` so HMR re-installs don't double-wrap.
+- **`awake/hydration`** — `console.error` wrap now uses
+  `.apply(this, args)` instead of a direct call, preserving the
+  `this` binding for any downstream wrapper. Added a `WRAP_MARKER`
+  so the detector skips itself on re-install. Detector errors are
+  caught so the wrap can never break `console.error` itself.
+
+### Verification
+- Runtime test pass on chromium headless via Playwright:
+  `rage_click`, `spa_route` (with URL update intact),
+  `hydration_mismatch`, `loaf`, `broken_resource`, `dom_size` all
+  fire correctly. `console.error` preservation confirmed via direct
+  message echo through the wrap chain.
+- New test harness in the monorepo at `capture/test-browser/` with a
+  Playwright-driven assertion script (`npm run test:browser:auto`).
+
+## 0.13.0 — 2026-05-11
+
+> Capture Awake — eleven proactive browser-side detectors that observe
+> performance + UX problems and emit events alongside the error tracker.
+> Zero-config: importing `@inariwatch/capture/browser` runs `init()` and
+> `installAwake()` in one shot.
+
+### Added
+- **Web Vitals** — LCP / FCP / TTFB / CLS / INP via the official
+  `web-vitals@4` library (peer dependency, optional).
+- **LoAF** — Long Animation Frame API (Chrome 123+) with longtask
+  fallback for older browsers.
+- **Broken Resources** — captures 404 images, scripts, stylesheets,
+  fonts.
+- **Resource Audit** — slow images, slow fetches, render-blocking
+  resources, oversized images, third-party script impact totals.
+- **SPA Routing** — wraps `history.pushState`/`replaceState`/`popstate`
+  to time route transitions.
+- **Memory Leak heuristic** — samples `performance.memory` + DOM node
+  count across navigations, reports when both grow monotonically.
+- **Rage / Dead Clicks** — clicks tightly clustered in space + time;
+  interactive elements that produce no DOM response within 3 s.
+- **Hydration mismatch** — regex pattern-match on `console.error` for
+  React 18 / Next / Vue 3 / Nuxt / Astro hydration error messages.
+- **DOM Size** — warns when `<body>` exceeds typical-page thresholds.
+- **Image Optimizer** — flags large unsized images, non-modern formats.
+- **Storage Quota** — reads `navigator.storage.estimate()`, warns near
+  cap.
+
+### Misc
+- New subpath export `@inariwatch/capture/browser` (auto-init).
+- Detector code in `src/awake/`; 11 modules, ~38 KB raw / ~12 KB gzip
+  total before tree-shaking. Most users will only pay for what their
+  bundler keeps.
+
 ## 0.12.0 — 2026-05-05
 
 > Sprint 1 batched release — five capture-side items shipped, plus
