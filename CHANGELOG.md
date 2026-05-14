@@ -3,308 +3,86 @@
 All notable changes to the SDK. Older releases pre-date this file —
 see git history for `0.10.x` and earlier.
 
-## 0.13.1 — 2026-05-13
+## 0.14.0 — 2026-05-13
 
-> Patch on top of 0.13.0. Five Awake detectors were shipped in the
-> previous release with a handful of real-world bugs that a code audit
-> caught (and runtime testing on a chromium headless browser confirmed).
-> All five are now hardened. No public API change — internal-only.
+### Performance — bundle-size diet
 
-### Fixed
-- **`awake/rage-clicks`** — dead-click detection installed a fresh
-  `MutationObserver` with `subtree: true` per click. In SPAs that
-  mutate `<body>` continuously (Intercom, animations, framework
-  re-renders) the `mutated=true` flag flipped near-100% of the time,
-  so legitimate dead clicks were never reported. Replaced with one
-  persistent shared observer + a pending-checks array; clicks are now
-  flagged mutated only when DOM changes land within their `deadMs`
-  window. Pagehide teardown added.
-- **`awake/memory-leak`** — heap step tolerance tightened from 10% to
-  2% per sample. With the 10% setting, a heap going `100 MB → 90 MB`
-  (a normal GC drop) still counted as "monotonic growth" and false-
-  positived. Added end-to-end growth floors (≥5% AND ≥5 MB for heap;
-  ≥50 net nodes for DOM) so startup lazy-loads no longer trip the
-  detector.
-- **`awake/resource-audit`** — the 3-second debounce for the
-  `third_party_impact` flush could never fire on a chat-style app
-  whose `fetch` rate is faster than 3 s. Replaced with a fixed 10-second
-  `setInterval` + immediate flush on `visibilitychange` / `pagehide`.
-  Per-kind event cap of 25/tab added for `slow_image`, `slow_fetch`,
-  `oversized_image`, `render_blocking` so a render thrash doesn't
-  flood the cloud.
-- **`awake/spa-routing`** — `pushState` and `replaceState` wrap now
-  captures the CURRENT implementation at install time (which may itself
-  be wrapped by React Router / Next / MUI / Sentry) and forwards
-  through it, instead of overwriting it. The previous code clobbered
-  whichever router wrapped last. Added a non-enumerable
-  `INSTALLED_MARKER` so HMR re-installs don't double-wrap.
-- **`awake/hydration`** — `console.error` wrap now uses
-  `.apply(this, args)` instead of a direct call, preserving the
-  `this` binding for any downstream wrapper. Added a `WRAP_MARKER`
-  so the detector skips itself on re-install. Detector errors are
-  caught so the wrap can never break `console.error` itself.
+Two lazy-load refactors trim the SDK's default initial bundle by 23%
+and the worst-case total bundle by 32%, with zero API changes.
 
-### Verification
-- Runtime test pass on chromium headless via Playwright:
-  `rage_click`, `spa_route` (with URL update intact),
-  `hydration_mismatch`, `loaf`, `broken_resource`, `dom_size` all
-  fire correctly. `console.error` preservation confirmed via direct
-  message echo through the wrap chain.
-- New test harness in the monorepo at `capture/test-browser/` with a
-  Playwright-driven assertion script (`npm run test:browser:auto`).
+| Scenario | Before (0.13.1) | After (0.14.0) | Δ |
+|---|---|---|---|
+| `core` (init + captureException + flush) | 6,018 B gz | **4,640 B gz** | **−1,378 B (−23%)** |
+| `core+breadcrumbs+scope` | 6,107 B gz | **4,729 B gz** | **−1,378 B (−23%)** |
+| `everything` initial | 7,785 B gz | 7,814 B gz | +29 B (noise) |
+| `everything` total (all chunks) | 27,022 B gz | **18,448 B gz** | **−8,574 B (−32%)** |
 
-## 0.13.0 — 2026-05-11
+Measured with esbuild 0.21.5 on Node 22 with `--splitting` on (matches
+how Next.js Turbopack / Vite / Webpack actually emit chunks for ESM
+dynamic imports). See `BUNDLE_BUDGET.md` for the full methodology and
+the CI gate that enforces the new ceiling.
 
-> Capture Awake — eleven proactive browser-side detectors that observe
-> performance + UX problems and emit events alongside the error tracker.
-> Zero-config: importing `@inariwatch/capture/browser` runs `init()` and
-> `installAwake()` in one shot.
+### What changed
 
-### Added
-- **Web Vitals** — LCP / FCP / TTFB / CLS / INP via the official
-  `web-vitals@4` library (peer dependency, optional).
-- **LoAF** — Long Animation Frame API (Chrome 123+) with longtask
-  fallback for older browsers.
-- **Broken Resources** — captures 404 images, scripts, stylesheets,
-  fonts.
-- **Resource Audit** — slow images, slow fetches, render-blocking
-  resources, oversized images, third-party script impact totals.
-- **SPA Routing** — wraps `history.pushState`/`replaceState`/`popstate`
-  to time route transitions.
-- **Memory Leak heuristic** — samples `performance.memory` + DOM node
-  count across navigations, reports when both grow monotonically.
-- **Rage / Dead Clicks** — clicks tightly clustered in space + time;
-  interactive elements that produce no DOM response within 3 s.
-- **Hydration mismatch** — regex pattern-match on `console.error` for
-  React 18 / Next / Vue 3 / Nuxt / Astro hydration error messages.
-- **DOM Size** — warns when `<body>` exceeds typical-page thresholds.
-- **Image Optimizer** — flags large unsized images, non-modern formats.
-- **Storage Quota** — reads `navigator.storage.estimate()`, warns near
-  cap.
+- **`redact` lazy-loaded.** The full redactor (`patterns.ts`, `keys.ts`,
+  `hash.ts`, `luhn.ts`) is now dynamic-imported on the first send AFTER
+  `init({ redact: true })` instead of being static-imported at module
+  load. Users who don't enable redaction never pay for the module.
+  `resolveRedactConfig` moved to a tiny `redact/config.js` slice that
+  `client.ts` still static-imports — sub-1 KB, zero deps on the heavy
+  patterns. See `docs/decisions/0001-lazy-redact.md`.
 
-### Misc
-- New subpath export `@inariwatch/capture/browser` (auto-init).
-- Detector code in `src/awake/`; 11 modules, ~38 KB raw / ~12 KB gzip
-  total before tree-shaking. Most users will only pay for what their
-  bundler keeps.
+- **`intent` runtime-resolved.** The intent contracts compiler
+  (`intent/index.ts` + 6 source parsers for TS / Zod / OpenAPI /
+  Drizzle / Prisma / GraphQL — ~30 KB raw) now loads at runtime via
+  string-variable indirection in the dynamic import. Bundlers without
+  code-splitting no longer inline it; bundlers with splitting (which
+  used to ship a 10 KB lazy chunk on disk) no longer emit one at all.
+  See `docs/decisions/0002-lazy-intent.md`.
 
-## 0.12.0 — 2026-05-05
+### Added (infrastructure, not user API)
 
-> Sprint 1 batched release — five capture-side items shipped, plus
-> coordinated `web/` server hardening (S1-1 decompression + S1-5
-> Ed25519-required gate) that lives in the monorepo and ships via the
-> next Hetzner deploy. S1-2 (DefinePlugin tree-shake flags) was
-> DROPPED after measurement showed the browser bundle is already
-> 2.5 KB gzipped post-0.11.1 — already 10× lighter than Sentry's
-> tree-shaken errors-only build, so the premise of the work was gone.
+- **`scripts/measure-bundle.mjs`** — reproducible measurement harness.
+  Bundles 7 scenarios with esbuild, emits structured JSON to
+  `ci/bundle-size.json`. Run with `--check` to enforce limits from
+  `BUNDLE_BUDGET.md`.
+- **`BUNDLE_BUDGET.md`** — hard-limit budget table the CI gate parses.
+  Raising a limit requires a PR with justification.
+- **`.github/workflows/bundle-size.yml`** — CI gate on every PR
+  touching `capture/`. Runs the measurement, posts a markdown diff
+  comment on the PR with 🟢 / 🟡 / 🔴 indicators per scenario, fails
+  the build if any scenario exceeds its budget. Also builds the
+  `test-bundlers/next15/` app and scans `.next/**/*.js` for heavy-
+  module marker strings — catches Turbopack-specific regressions that
+  esbuild-based tests miss.
+- **`test-bundlers/next15/`** — production-bundler validation app.
+  Minimal Next.js 15 page that imports the SDK as a real user would;
+  the verify-bundle scanner asserts no heavy-module markers leak.
+- **`test/lazy-redact.test.mjs`** — 6 tests verifying the redact
+  config / payload split, including bundle-shape scans.
+- **`test/lazy-intent.test.mjs`** — 3 tests verifying intent stays
+  runtime-resolved when not explicitly imported.
+- **`docs/decisions/0001-lazy-redact.md`** and
+  **`0002-lazy-intent.md`** — design docs documenting context,
+  alternatives, and tradeoffs for each refactor.
 
-### Added
-- **TC39 ecma426 debug-IDs across all four bundler plugins** (Vite /
-  Webpack / Next.js / Nuxt). Each plugin computes a deterministic
-  UUIDv5 from each emitted chunk's content + a stable namespace,
-  emits the `//# debugId=<uuid>` magic comment at the bottom of the
-  chunk, and writes the same `debugId` field into the attached source
-  map. This is the modern alternative to the brittle "release
-  version + abs_path" model used by older error monitors — debug IDs
-  are content-addressed, so they survive file renames,
-  hash-suffixed asset paths, and CDN cache busts.
-  - `inariwatchVite()` installs a Rollup `renderChunk` hook.
-  - `withInariWatchWebpack()` appends an `InariwatchDebugIdWebpackPlugin`
-    to the user's `plugins[]`. Skipped on Node-target builds (debug IDs
-    are a client-symbolication concern; server JS goes through Node
-    directly).
-  - `withInariWatch()` (Next.js) wraps the user's `webpack(config)`
-    hook to push the same plugin into the CLIENT compilation only.
-    Detects Turbopack via the `turbopack` config key (Next 15+) or the
-    legacy `experimental.turbo` flag and silently disables the
-    debug-id work — Turbopack's plugin API isn't webpack-compatible;
-    a native Turbopack hook is tracked as a follow-up.
-  - The Nuxt module pushes `inariwatchVite()` into
-    `nuxt.options.vite.plugins` so the same Vite-side machinery
-    powers Nuxt 3 builds.
-  - Opt out per-plugin with `{ injectDebugIds: false }`. The shared
-    helpers (`computeDebugId` / `injectDebugIdComment` /
-    `injectDebugIdIntoSourceMap`) live in `src/plugins/debug-id.ts`.
-- **Brotli compression for the wire payload** (opt-in). Set
-  `init({ compression: "br" })` or `INARIWATCH_COMPRESSION=br` to
-  shrink large events with brotli before the POST. Saves 70-85% of
-  bandwidth on payloads ≥ 1 KB. Below the 1 KB threshold, or when the
-  compressed body wouldn't beat the original by ≥ 10%, the SDK falls
-  back to raw JSON automatically. Browser + edge runtimes silently
-  skip compression (no `node:zlib` available). The HMAC signature is
-  computed over the WIRE bytes — server-side reject path stays cheap
-  (HMAC fails before any decompression CPU is burned). Default off
-  for backward compatibility; flip on once your DSN endpoint
-  understands `Content-Encoding: br` (the InariWatch dashboard
-  endpoint does as of this release).
-- **`npx @inariwatch/capture doctor`** — non-destructive self-diagnostic.
-- **`npx @inariwatch/capture doctor`** — non-destructive self-diagnostic.
-  Runs in <1 second offline (use `--offline` to skip the DSN reachability
-  HEAD probe). Ten checks, each one of `ok` / `info` / `warn` / `fail`
-  with a one-line hint when something is off:
-  - Node version (>= 18)
-  - `package.json` present + `@inariwatch/capture` declared
-  - Framework auto-detected (Next / Nuxt / Vite / Remix / SvelteKit /
-    Astro / Express / Fastify / Hono / plain Node)
-  - Framework plugin wired in the right config file
-    (`withInariWatch` / `inariwatchVite` / `@inariwatch/capture/nuxt` /
-    `--import @inariwatch/capture/auto`)
-  - Next.js `instrumentation.ts` exports `onRequestError` (warn if the
-    file imports `capture/auto` but forgot the handler — the most common
-    half-finished onboarding state)
-  - `INARIWATCH_DSN` resolved (process.env > .env.local > .env)
-  - DSN parses as a valid URL
-  - DSN endpoint reachable (HEAD probe, 5s timeout — only the hostname,
-    never the secret-bearing URL, so no integration secrets leak)
-  - Dev-log JSONL state (event count + latest event age) when
-    `INARIWATCH_DEV_LOG=1` is on
-  - MCP server registered in Cursor (`~/.cursor/mcp.json`) or Claude
-    Code (`~/.config/claude/mcp.json`, `~/.claude/mcp.json`)
+### Backward compatibility
 
-  Exit code is `0` when no checks fail, `1` when any do. Warnings and
-  info notes never affect exit, so it's safe to wire into CI as
-  `npx @inariwatch/capture doctor --offline`.
+Fully backward-compatible. Every public export from previous versions
+still resolves to the same function (`resolveRedactConfig` is now
+re-exported from `redact/index.js`, pointing at the new
+`redact/config.js` slice; identity preserved). No breaking changes,
+no migration required. Existing apps upgrade with `npm update
+@inariwatch/capture`.
 
-## 0.11.1 — 2026-05-05
+### Latency tradeoff
 
-### Added
-- **MCP stdio server** (`npx @inariwatch/capture mcp`). JSON-RPC 2.0
-  over stdin/stdout, conforming to the Model Context Protocol spec
-  (`2024-11-05`). Cursor 1.0+, Claude Code, Windsurf, Copilot Agent,
-  and Raycast all consume this transport via four lines of config.
-  The server reads `.inariwatch/errors.jsonl` (the dev-log written
-  when `INARIWATCH_DEV_LOG=1` is set on the running app — that file
-  has existed for a while; this release exposes it). Three tools:
-  - `inari_recent_errors({ limit?, severity? })` — N most recent
-    events, newest first, body-stack trimmed to first 10 lines.
-  - `inari_get_error({ fingerprint })` — full event by fingerprint;
-    prefix match works.
-  - `inari_clear_log()` — truncate the dev-log; reports the count.
-  Zero deps, zero network, Node-only. Override the file path with
-  `INARIWATCH_DEV_LOG_PATH`. The CLI (`npx @inariwatch/capture`)
-  dispatches `mcp` to the new module; `init` (the auto-setup wizard)
-  is unchanged. Setup snippet is documented in the README.
+First send AFTER `init({ redact: true })` adds ~5–20 ms cold start
+while the redactor module resolves. Subsequent sends are identical
+to the previous static-import baseline (cached at module scope).
+`init()` itself remains synchronous — no perceived startup delay.
 
-### Fixed
-- Peer-agent default model changed from `gpt-5.4` to `gpt-4o-mini`.
-  The previous default targeted a model that may not be available on
-  every user's OpenAI account, causing the agent loop to fail on first
-  use unless the caller passed an explicit `model:` override. The new
-  default is the cheapest GPT-4-class model with stable tool-calling
-  support, matching the web-side analysis default. Callers that already
-  pass `model:` are unaffected.
-
-### Removed
-- `forensic/fork-bridge.ts` (internal). The ForensicVM Node fork was
-  cancelled in 2026-04 and never had a binding shipped, so this module
-  has always thrown `"fork bridge not yet implemented"` on every
-  install. The inspector fallback (`node:inspector/promises`) is now
-  the only forensic capture path. The public surface is preserved:
-  `isForkAvailable()` still exports and now always returns `false`;
-  `registerForensicHook()` keeps its `{ mode: "fork" | "inspector" }`
-  return type for compatibility with exhaustive switches but only ever
-  resolves to `"inspector"`; the `forceFallback` option is accepted as
-  a no-op (the Python port still uses it to choose between PEP 669 and
-  `settrace`).
-- `src/browser.ts` (the legacy browser auto-init that wrapped the
-  Node-shaped `client.ts`). Replaced with a redirect: the
-  `@inariwatch/capture/browser` subpath now resolves to the lean
-  `browser-v2/auto` entry. Side-effect contract is preserved —
-  `import "@inariwatch/capture/browser"` still auto-initializes from
-  `window.__INARIWATCH__`. New: `<meta name="inariwatch:dsn">` /
-  `inariwatch:environment` / `inariwatch:release` tags are now read as
-  fallback when no bundler can inject a config object. The legacy
-  `session: true` default that opportunistically attached an `rrweb`
-  ring buffer is gone — for full session replay use the dedicated
-  `@inariwatch/capture-replay` package (this was already documented as
-  the canonical path; the silent default was undocumented behavior).
-
-### Tests
-- New `test/mcp.test.mjs` (25 cases) drives `handleMessage()` with
-  synthesized JSON-RPC requests against a temp dev-log JSONL — avoids
-  spawning real stdio. Coverage: protocol invariants (jsonrpc field,
-  id round-tripping for number/string/null, notifications get no
-  reply, parse / invalid-request / method-not-found / invalid-params
-  error codes); initialize handshake shape; `tools/list` returns the
-  3 declared tools; `TOOL_DISPATCH` and `TOOLS` are kept in sync;
-  `inari_recent_errors` limit clamping (default 10, min 1, max 100),
-  severity filter, helpful empty-log message, body-stack truncation
-  to first 10 lines, corrupt-line skip; `inari_get_error` full +
-  prefix fingerprint match, missing-param error, not-found message;
-  `inari_clear_log` truncate + count report, empty-log = 0;
-  `resolveDevLogPath` env override + cwd default. End-to-end smoke
-  via `node dist/cli.js mcp` confirmed initialize + tools/list
-  responses match the wire spec.
-
-- New `test/shield.test.mjs` (32 cases) covering the three pure-logic
-  layers of the runtime SAST module: (a) **taint store** — markTainted
-  / markObjectTainted / checkTaint / runWithTaintStore /
-  AsyncLocalStorage isolation / MAX_TAINT_ENTRIES eviction (locks the
-  500-entry FIFO); (b) **detection** — inspectSink classification of
-  16 sink names to the right `VulnerabilityType`, default-fallback
-  behavior for unknown sinks, `minInputLength` config, `blocked` flag
-  reflecting `mode: "block"`, truncation invariants (taintedInput ≤
-  200 chars, sinkArgument ≤ 500), buildSecurityTitle /
-  buildSecurityBody output shape; (c) **sources** — shieldMiddleware
-  taints `req.{query,params,body,cookies}`, the four dangerous header
-  names (and ignores benign ones — `user-agent`, `accept-encoding`),
-  URL path segments + raw query string with URL-decoding,
-  `markRequestTainted` for Web Request objects (Next.js / Remix /
-  SvelteKit / Cloudflare Workers / Deno / Bun), invalid-URL
-  resilience, missing-field tolerance. Covers all 6 declared
-  `VulnerabilityType` mappings. Sink monkey-patch integration tests
-  (pg / mysql2 / child_process / fs) are out of scope here — they
-  need real driver installs and live in out-of-band fixtures. This
-  closes the largest "574 LOC of security code shipped default-on with
-  zero coverage" gap the audit flagged. No production code changed.
-
-- New `test/signing.test.mjs` (24 cases) targeting the gaps left by
-  `payload-v2.test.mjs`'s happy-path signing coverage. New checks:
-  Ed25519 determinism (RFC 8032 invariant); rejection of signatures
-  signed by a stranger keypair; malformed signature / pubkey rejection
-  (length, charset); `verifyReceiptIdSignature` never throws on
-  garbage input (hot-path safety guarantee); corrupted-file recovery
-  paths (regenerate when JSON is invalid, the persisted shape is
-  wrong, or `pub_key_id` length is off); ephemeral
-  `__createInMemoryKeypair` does not touch disk; cache behavior;
-  POSIX `0o600` perms on the persisted file (skipped on Windows);
-  pub_key_id derivation invariant (first 16 hex of SHA-256 of raw
-  pubkey bytes); plus a hardcoded **golden vector** (PKCS#8 PEM +
-  receipt → expected signature) that locks the signing protocol
-  byte-for-byte so a future refactor that swaps the algorithm,
-  pre-hash, or encoding fails loudly. The golden vector is also
-  cross-checked against an inline `Ed25519(SHA-256(receipt_id_utf8))`
-  recomputation. No production code changed.
-
-### Changed
-- Sensitive-field name list consolidated. `scope.ts` previously kept its
-  own `REDACT_BODY_FIELDS` literal in parallel with `redact/keys.ts`'s
-  `SENSITIVE_KEYS` set, and the two had drifted: `credit_card`,
-  `card_number`, `cvv`, `cvc`, `ssn`, and `social_security` were
-  scrubbed by the always-on baseline in `setRequestContext()` but NOT
-  by the opt-in `redact: true` pipeline. Both layers now share
-  `SENSITIVE_KEYS`. As a consequence:
-  - **`redact: true` users** now get those financial-PII field names
-    wholesale-redacted across the entire event (previously only the
-    request body's keys were caught — and only because `scope.ts` had
-    its own list). Card numbers were already content-redacted by the
-    `CREDIT_CARD` regex (Luhn-validated); this catches the case where
-    the value was mangled (spaces / dashes stripped).
-  - **All users** get a strictly broader baseline scrub at
-    `setRequestContext()`. Field names like `aws_secret_access_key`,
-    `aws_access_key_id`, `client_secret`, `id_token`, `private_key`,
-    `pwd`, `apikey`, `api-key`, `credentials`, `set-cookie`,
-    `x-api-key`, `x-auth-token`, `x-access-token`, `x-csrf-token`,
-    `sessionid`, `cookie`, and `session` are now whole-value redacted
-    in request bodies — previously only matched in headers. This is
-    a privacy improvement, not a behavior loss.
-  - The literal `pass` field-name (8 chars, false-positive prone — it
-    matched `passport`, `passing`, `pass_through`) is no longer in the
-    list. `password` / `passwd` / `pwd` cover the real cases without
-    the false positives.
-  Layering is now documented in `scope.ts` header: scope runs an
-  always-on baseline scrub of the request context; `redact/` runs the
-  full opt-in regex + key scrub of the entire payload at send time.
+---
 
 ## 0.11.0 — 2026-05-02
 

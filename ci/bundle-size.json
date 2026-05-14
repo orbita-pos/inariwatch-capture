@@ -1,0 +1,78 @@
+{
+  "measuredAt": "2026-05-14T05:33:38.893Z",
+  "captureVersion": "0.14.0",
+  "node": "v24.14.1",
+  "esbuild": "0.21.5",
+  "scenarios": [
+    {
+      "name": "core",
+      "imports": "init + captureException + captureMessage + flush",
+      "initialMin": 11457,
+      "initialGz": 4640,
+      "totalMin": 44857,
+      "totalGz": 15435,
+      "monoMin": 38398,
+      "monoGz": 13313
+    },
+    {
+      "name": "core+breadcrumbs+scope",
+      "imports": "core + addBreadcrumb + setUser + setTag + runWithScope",
+      "initialMin": 11519,
+      "initialGz": 4729,
+      "totalMin": 44919,
+      "totalGz": 15520,
+      "monoMin": 38454,
+      "monoGz": 13388
+    },
+    {
+      "name": "core+fulltrace",
+      "imports": "core + initFullTrace + getSessionId + injectSessionHeader",
+      "initialMin": 8630,
+      "initialGz": 3670,
+      "totalMin": 41604,
+      "totalGz": 14425,
+      "monoMin": 35347,
+      "monoGz": 12331
+    },
+    {
+      "name": "core+redact",
+      "imports": "core + redactPayload + resolveRedactConfig (PII redactor)",
+      "initialMin": 12182,
+      "initialGz": 5133,
+      "totalMin": 45120,
+      "totalGz": 15773,
+      "monoMin": 38895,
+      "monoGz": 13723
+    },
+    {
+      "name": "core+v2",
+      "imports": "core + payload v2 builders + budget (Merkle, JCS, evidence pack)",
+      "initialMin": 10228,
+      "initialGz": 4197,
+      "totalMin": 43166,
+      "totalGz": 14879,
+      "monoMin": 39731,
+      "monoGz": 13759
+    },
+    {
+      "name": "core+causal",
+      "imports": "core + causal graph engine (full hook set)",
+      "initialMin": 8659,
+      "initialGz": 3691,
+      "totalMin": 41597,
+      "totalGz": 14427,
+      "monoMin": 35326,
+      "monoGz": 12323
+    },
+    {
+      "name": "everything",
+      "imports": "every public export used (worst case)",
+      "initialMin": 19727,
+      "initialGz": 7780,
+      "totalMin": 53179,
+      "totalGz": 18435,
+      "monoMin": 52948,
+      "monoGz": 18068
+    }
+  ]
+}

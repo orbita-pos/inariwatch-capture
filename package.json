@@ -1,6 +1,6 @@
 {
   "name": "@inariwatch/capture",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "Lightweight error capture SDK for InariWatch — replaces Sentry with zero dependencies. Includes FullTrace session id propagation for causal debugging. Add @inariwatch/capture-replay for full session replay.",
   "type": "module",
   "main": "./dist/index.js",
@@ -131,7 +131,6 @@
   "sideEffects": [
     "./dist/auto.js",
     "./dist/browser.js",
-    "./dist/browser-v2/auto.js",
     "./dist/shield/index.js",
     "./dist/edge/auto.js",
     "./dist/edge/browser.js",
@@ -141,6 +140,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test --no-warnings test-setup/run-tests.mjs test/*.test.mjs test/causal/*.test.mjs test/intent/*.test.mjs",
+    "test:browser": "vite --config test-browser/vite.config.ts",
+    "test:browser:auto": "node test-browser/playwright-test.mjs",
     "prepublishOnly": "tsc"
   },
   "keywords": [
@@ -177,6 +178,7 @@
   "devDependencies": {
     "@types/node": "^25.5.0",
     "typescript": "^5.5.0",
+    "vite": "^8.0.12",
     "web-vitals": "^4.2.0"
   }
 }

@@ -81,13 +81,30 @@ export async function prepareV2Payload(
   // call site (TS interfaces, Zod schemas, …). Skipped silently when
   // sources are unreachable (Edge / browser / production bundle without
   // source files), gated by CAPTURE_INTENT_COMPILER for opt-in safety.
+  //
+  // String-variable indirection on both dynamic imports (same pattern
+  // as `client.ts`' redact / v2-emit / signing imports) so bundlers
+  // without code-splitting don't pull `intent/` (~30 KB across 7 source
+  // parsers: TS/Zod/OpenAPI/Drizzle/Prisma/GraphQL) or `payload-v2`'s
+  // unneeded extras into the main chunk. With splitting (Next/Vite/
+  // Webpack defaults), intent stays in its own lazy chunk that loads
+  // only when CAPTURE_INTENT_COMPILER=1 fires this branch at runtime.
+  // See docs/decisions/0002-lazy-intent.md.
   if (!event.expected && intentCompilerEnabled() && event.body) {
     try {
+      // parseStackForEvidence lives in payload-v2.js which is already
+      // static-imported at the top of this file — no need to re-import
+      // dynamically. The bundler reuses the existing module.
       const { parseStackForEvidence } = await import("./payload-v2.js")
       const frames = parseStackForEvidence(event.body, event.sourceContext)
       const top = frames[0]
       if (top && top.file && top.file !== "<unknown>") {
-        const { extractIntentForFrame } = await import("./intent/index.js")
+        // intent/ is the ONLY module here that justifies indirection —
+        // it adds ~30 KB across 6 source parsers (TS/Zod/OpenAPI/
+        // Drizzle/Prisma/GraphQL). String-variable indirection ensures
+        // bundlers without code-splitting don't inline it.
+        const intentMod = "./intent/index.js"
+        const { extractIntentForFrame } = await import(/* webpackIgnore: true */ intentMod) as typeof import("./intent/index.js")
         const contracts = extractIntentForFrame({
           file: top.file,
           line: top.line,

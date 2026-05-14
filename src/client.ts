@@ -7,7 +7,27 @@ import { getBreadcrumbs, initBreadcrumbs } from "./breadcrumbs.js"
 import { getUser, getTags, getRequestContext } from "./scope.js"
 import { initFullTrace, getSessionId } from "./fulltrace.js"
 import { resolvePayloadVersion } from "./payload-version.js"
-import { redactPayload, resolveRedactConfig, type RedactConfig } from "./redact/index.js"
+// Static-import only the tiny config normalizer — the heavy
+// `redactPayload` (patterns + Luhn + FNV) is dynamic-imported below
+// inside `sendWithHooks` only when `resolvedRedactConfig.enabled`.
+// Trims ~3 KB gzipped from the default initial bundle for users who
+// never opt into redaction. See docs/decisions/0001-lazy-redact.md.
+import { resolveRedactConfig, type RedactConfig } from "./redact/config.js"
+
+// Cached lazy-loaded redactor. First send with redact enabled pays a
+// one-time microtask to resolve the dynamic import; subsequent sends
+// hit this cache. Module-level so the await happens once per process.
+let cachedRedactPayload: typeof import("./redact/index.js").redactPayload | null = null
+async function getRedactPayload() {
+  if (cachedRedactPayload) return cachedRedactPayload
+  // String-variable indirection mirrors the v2-emit trick in this file:
+  // it sidesteps Turbopack's eager static-analysis of dynamic imports
+  // so Edge bundles don't pull the patterns module when redact is off.
+  const redactMod = "./redact/index.js"
+  const mod = await import(/* webpackIgnore: true */ redactMod) as typeof import("./redact/index.js")
+  cachedRedactPayload = mod.redactPayload
+  return cachedRedactPayload
+}
 
 let globalTransport: Transport | null = null
 let globalConfig: CaptureConfig | null = null
@@ -68,9 +88,11 @@ async function sendWithHooks(event: ErrorEvent): Promise<void> {
       // Transport's `send` types `ErrorEvent`; the v2 shape is structurally
       // wider but the transport only reads `fingerprint` for retry dedup
       // and JSON-stringifies everything else, so it round-trips safely.
-      const finalV2 = resolvedRedactConfig.enabled
-        ? redactPayload(wire as unknown as ErrorEvent, resolvedRedactConfig)
-        : (wire as unknown as ErrorEvent)
+      let finalV2 = wire as unknown as ErrorEvent
+      if (resolvedRedactConfig.enabled) {
+        const redact = await getRedactPayload()
+        finalV2 = redact(finalV2, resolvedRedactConfig)
+      }
       globalTransport.send(finalV2)
       return
     } catch (err) {
@@ -87,9 +109,13 @@ async function sendWithHooks(event: ErrorEvent): Promise<void> {
   // Last step before the wire: in-process PII / secret redaction (v1
   // path). Runs after every integration hook and the user's beforeSend
   // so it sees the fully-enriched payload. No-op when redact is unset.
-  const finalEvent = resolvedRedactConfig.enabled
-    ? redactPayload(current, resolvedRedactConfig)
-    : current
+  // The redactor is lazy-loaded on first redacted send — adds one
+  // microtask round-trip the first time, cached thereafter.
+  let finalEvent = current
+  if (resolvedRedactConfig.enabled) {
+    const redact = await getRedactPayload()
+    finalEvent = redact(current, resolvedRedactConfig)
+  }
   globalTransport.send(finalEvent)
 }
 
